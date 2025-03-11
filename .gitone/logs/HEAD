@@ -1,0 +1,24 @@
+0000000000000000000000000000000000000000 d948e27bb300ed4acbc260bce49483a190cc91c6 Gleb Taftin <g.taftin@sdgroup.ai> 1719931610 +0300	commit (initial): Initial commit on bmicheal42
+d948e27bb300ed4acbc260bce49483a190cc91c6 e1c8b20905c912fad92a48c3927d2f6ccee42665 Gleb Taftin <g.taftin@sdgroup.ai> 1719931818 +0300	checkout: moving from bmicheal42 to master
+e1c8b20905c912fad92a48c3927d2f6ccee42665 d948e27bb300ed4acbc260bce49483a190cc91c6 Gleb Taftin <g.taftin@sdgroup.ai> 1719932275 +0300	checkout: moving from master to bmicheal42
+d948e27bb300ed4acbc260bce49483a190cc91c6 c4666986b25888afdb02c073abff881fde077dfa Gleb Taftin <g.taftin@sdgroup.ai> 1719933207 +0300	commit (merge): merge
+c4666986b25888afdb02c073abff881fde077dfa 17c4044d744adff1f8362f907ca45502b60db9d4 Gleb Taftin <g.taftin@sdgroup.ai> 1720031558 +0300	commit: [WIP] Columns names changed & Time in status Done
+17c4044d744adff1f8362f907ca45502b60db9d4 e1c8b20905c912fad92a48c3927d2f6ccee42665 Gleb Taftin <g.taftin@sdgroup.ai> 1720031646 +0300	checkout: moving from bmicheal42 to master
+e1c8b20905c912fad92a48c3927d2f6ccee42665 17c4044d744adff1f8362f907ca45502b60db9d4 Gleb Taftin <g.taftin@sdgroup.ai> 1720031682 +0300	merge bmicheal42: Fast-forward
+17c4044d744adff1f8362f907ca45502b60db9d4 4f31a0adc0754c6671dfb2ccd38480ba62d8b74d Gleb Taftin <g.taftin@sdgroup.ai> 1720096946 +0300	commit: [WIP] Deduplication FIXED; Last receive id update TURNED OFF
+4f31a0adc0754c6671dfb2ccd38480ba62d8b74d dd27a383363310228d717e976d84d38f291d4fe6 Gleb Taftin <g.taftin@sdgroup.ai> 1720097063 +0300	commit: [WIP] Deduplication FIXED; Last receive id update TURNED OFF
+dd27a383363310228d717e976d84d38f291d4fe6 8da81c0a253688a7b05996bdc102cf60b7fb1abd Gleb Taftin <g.taftin@sdgroup.ai> 1720097236 +0300	pull --rebase origin master (start): checkout 8da81c0a253688a7b05996bdc102cf60b7fb1abd
+8da81c0a253688a7b05996bdc102cf60b7fb1abd 5a311c69359d7e4db7023b4df9e100a1106e7340 Gleb Taftin <g.taftin@sdgroup.ai> 1720097236 +0300	pull --rebase origin master (pick): [WIP] Deduplication FIXED; Last receive id update TURNED OFF
+5a311c69359d7e4db7023b4df9e100a1106e7340 b1572a748550d928b35a6779e1e6e0d0402a9456 Gleb Taftin <g.taftin@sdgroup.ai> 1720097236 +0300	pull --rebase origin master (pick): [WIP] Deduplication FIXED; Last receive id update TURNED OFF
+b1572a748550d928b35a6779e1e6e0d0402a9456 b1572a748550d928b35a6779e1e6e0d0402a9456 Gleb Taftin <g.taftin@sdgroup.ai> 1720097236 +0300	pull --rebase origin master (finish): returning to refs/heads/master
+b1572a748550d928b35a6779e1e6e0d0402a9456 4e501a53509749f151ff7cf0d9f208677a006d14 Gleb Taftin <g.taftin@sdgroup.ai> 1720111706 +0300	commit: [WIP] get_alert_history CHANGED to search by id
+4e501a53509749f151ff7cf0d9f208677a006d14 4ffc9629f0afdce3cf03f42de7797c63de4d3071 Gleb Taftin <g.taftin@sdgroup.ai> 1720116401 +0300	commit: debug
+4ffc9629f0afdce3cf03f42de7797c63de4d3071 4ffc9629f0afdce3cf03f42de7797c63de4d3071 Gleb Taftin <g.taftin@sdgroup.ai> 1720116456 +0300	reset: moving to HEAD
+4ffc9629f0afdce3cf03f42de7797c63de4d3071 ef060201a1f5821603613773dd8a4ce92c437811 Gleb Taftin <g.taftin@sdgroup.ai> 1720116460 +0300	pull --rebase origin master (start): checkout ef060201a1f5821603613773dd8a4ce92c437811
+ef060201a1f5821603613773dd8a4ce92c437811 1647512a1a70fc7a924859eeadb50c866e3768d9 Gleb Taftin <g.taftin@sdgroup.ai> 1720116460 +0300	pull --rebase origin master (pick): debug
+1647512a1a70fc7a924859eeadb50c866e3768d9 1647512a1a70fc7a924859eeadb50c866e3768d9 Gleb Taftin <g.taftin@sdgroup.ai> 1720116460 +0300	pull --rebase origin master (finish): returning to refs/heads/master
+1647512a1a70fc7a924859eeadb50c866e3768d9 4171bb8c9fb46e4a62ca26075342517c43673aa3 Gleb Taftin <g.taftin@sdgroup.ai> 1720196595 +0300	commit: [WIP] filter only my&opened issues DONE
+4171bb8c9fb46e4a62ca26075342517c43673aa3 8e371005ddbf6f5f463472acaa664905c7b919d5 Gleb Taftin <g.taftin@sdgroup.ai> 1731660111 +0300	commit: IDK WHAT IS DONE HERE
+8e371005ddbf6f5f463472acaa664905c7b919d5 3e6b49e0ef59c1a1e319695e6ab909ea3893597e Gleb Taftin <g.taftin@sdgroup.ai> 1741167946 +0300	reset: moving to origin/master
+3e6b49e0ef59c1a1e319695e6ab909ea3893597e 3e6b49e0ef59c1a1e319695e6ab909ea3893597e Gleb Taftin <g.taftin@sdgroup.ai> 1741167953 +0300	reset: moving to origin/master
+3e6b49e0ef59c1a1e319695e6ab909ea3893597e 0dbd1012f0fe94b36c0b0f354dd838ac696292d6 Gleb Taftin <g.taftin@sdgroup.ai> 1741696852 +0300	pull: Fast-forward

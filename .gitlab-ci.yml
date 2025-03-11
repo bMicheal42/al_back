@@ -1,0 +1,12 @@
+build1:
+  stage: deploy
+  script:
+    - docker build -t alerta-server-sdg .
+    - cd /root/alerta
+    - docker compose up --detach
+  tags: 
+    - alerta
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "master"'
+      when: always
+      allow_failure: true

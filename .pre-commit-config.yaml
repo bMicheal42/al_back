@@ -1,0 +1,41 @@
+repos:
+-   repo: https://github.com/hhatto/autopep8
+    rev: v2.0.4
+    hooks:
+    -   id: autopep8
+-   repo: https://github.com/pre-commit/pre-commit-hooks.git
+    rev: v4.5.0
+    hooks:
+    -   id: check-added-large-files
+    -   id: check-ast
+    -   id: check-byte-order-marker
+    -   id: check-case-conflict
+    -   id: check-docstring-first
+    -   id: check-json
+    -   id: check-merge-conflict
+    -   id: check-yaml
+    -   id: debug-statements
+    -   id: double-quote-string-fixer
+    -   id: end-of-file-fixer
+    -   id: fix-encoding-pragma
+        args: ['--remove']
+    -   id: pretty-format-json
+        args: ['--autofix']
+    -   id: name-tests-test
+        args: ['--django']
+        exclude: ^tests/helpers/
+    -   id: requirements-txt-fixer
+    -   id: trailing-whitespace
+-   repo: https://github.com/pycqa/flake8
+    rev: 6.1.0
+    hooks:
+    -   id: flake8
+-   repo: https://github.com/asottile/pyupgrade
+    rev: v3.15.0
+    hooks:
+    -   id: pyupgrade
+        args: ['--py3-plus']
+-   repo: https://github.com/PyCQA/isort
+    rev: 5.13.2
+    hooks:
+    -   id: isort
