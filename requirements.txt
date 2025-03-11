@@ -7,7 +7,7 @@ Flask-Cors==4.0.0
 mohawk==1.1.0
 psycopg2==2.9.9
 PyJWT==2.8.0
-pymongo==4.4.1
+pymongo==4.11.2
 pyparsing==3.1.2
 python-dateutil==2.9.0.post0
 pytz==2024.1
