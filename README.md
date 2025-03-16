@@ -16,6 +16,7 @@
   - [4. Configure environment variables and start the server](#4-configure-environment-variables-and-start-the-server)
   - [5. Create admin account](#5-create-admin-account)
   - [6. Install and configure CLI for testing](#6-install-and-configure-cli-for-testing)
+  - [7. Generation of alerts for testing](#7-generation-of-alerts-for-testing)
   - [Troubleshooting](#troubleshooting)
 - [Default Alerta instructions](#default-alerta-instructions)
   - [Installation](#installation)
@@ -138,7 +139,7 @@ pip install alerta
 ```
 
 ```bash
-# Authenticate in CLI, for admin user - write email used above when create admin user
+# Authenticate in CLI, for admin user - write email used above when create admin user (--username admin2@example.com --password admin123)
 alerta login
 ```
 
@@ -152,6 +153,29 @@ alerta send \
   --severity "minor" \
   --text "This is a test alert"
 ```
+
+#### 7. Generation of alerts for testing
+
+```bash
+# See already generated keys
+alerta keys
+```
+If you do not have any keys then you need to generate a new key.
+```bash
+# Generate new key
+alerta key
+```
+
+Then go to file alerta-creaty.py in alerta-create folder
+```bash
+cd alerta-create
+```
+
+```bash
+# generate alerts for instance projectGroupAndInfoSystem pattern
+python alerta-create.py -f projectGroupAndInfoSystem_PROBLEM.json
+```
+
 
 #### Troubleshooting
 
