@@ -318,7 +318,7 @@ AUTO_REFRESH_INTERVAL = 1000  # ms
 ROUTING_DIST = 'alerta-routing'
 
 # Plugins
-PLUGINS = ['acked_by', 'remote_ip', 'reject', 'heartbeat', 'blackout', 'forwarder']
+PLUGINS = ['acked_by']
 PLUGINS_RAISE_ON_ERROR = True  # raise RuntimeError exception on first failure
 
 # reject plugin settings

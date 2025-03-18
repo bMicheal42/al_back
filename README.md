@@ -36,6 +36,9 @@ The Alerta monitoring tool was developed with the following aims in mind:
 - distributed and de-coupled so that it is **SCALABLE**
 - minimal **CONFIGURATION** that easily accepts alerts from any source
 - quick at-a-glance **VISUALISATION** with drill-down to detail
+- distributed and de-coupled so that it is **SCALABLE**
+- minimal **CONFIGURATION** that easily accepts alerts from any source
+- quick at-a-glance **VISUALISATION** with drill-down to detail
 
 ![webui](/docs/images/alerta-webui-v7.jpg?raw=true)
 
@@ -224,6 +227,8 @@ Alerta and MongoDB can also run using Docker containers, see [alerta/docker-aler
 
 ### Configuration
 
+To configure the `alertad` server override the default settings in `/etc/alertad.conf`
+or using `ALERTA_SVR_CONF_FILE` environment variable::
 To configure the `alertad` server override the default settings in `/etc/alertad.conf`
 or using `ALERTA_SVR_CONF_FILE` environment variable::
 
