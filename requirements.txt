@@ -13,7 +13,7 @@ lxml==5.2.1
 mohawk==1.1.0
 psycopg2_binary==2.9.9
 PyJWT==2.8.0
-pymongo==4.4.1
+pymongo==4.11.3
 pyparsing==3.2.2
 pysaml2==7.5.2
 pytest==7.4.4
