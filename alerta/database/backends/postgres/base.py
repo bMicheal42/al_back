@@ -523,27 +523,19 @@ class Backend(Database):
             return True  # nothing to update
 
         try:
-            values = [
-                (update['id'], json.dumps(update['attributes'])) for update in updates
-            ]
-
-            values_sql = ', '.join(
-                f"('{item[0]}', '{item[1]}'::jsonb)" for item in values
-            )
-
+            values = [(update['id'], json.dumps(update['attributes'])) for update in updates]
+            values_sql = ', '.join(["(%s, %s::jsonb)"] * len(values))
             update_query = f"""
                 UPDATE alerts
                 SET attributes = attributes || data.new_attrs
                 FROM (VALUES {values_sql}) AS data(id, new_attrs)
                 WHERE alerts.id = data.id
-                RETURNING alerts.id
             """
-
-            result = self._updateall(update_query, {}, returning=True)
-
-            return bool(result)
+            query_params = [param for item in values for param in item]
+            self._updateall(update_query, query_params)
+            return True
         except Exception as e:
-            print(f"Error updating attributes: {e}")
+            logging.error("Error updating attributes: %s", repr(e))
             return False
 
     def mass_update_last_receive_time(self, updates: List[Dict[str, Any]]) -> bool:
@@ -552,21 +544,18 @@ class Backend(Database):
 
         try:
             values = [(update["id"], update["last_receive_time"]) for update in updates]
-
-            values_str = ", ".join(f"('{id}', '{time}')" for id, time in values)
-
+            values_sql = ', '.join(["(%s, %s)"] * len(values))
             update_query = f"""
                 UPDATE alerts
                 SET last_receive_time = data.new_time::timestamp
-                FROM (VALUES {values_str}) AS data(id, new_time)
+                FROM (VALUES {values_sql}) AS data(id, new_time)
                 WHERE alerts.id = data.id
-                RETURNING alerts.id
             """
-
-            result = self._updateall(update_query, [], returning=True)
-            return bool(result)
+            query_params = [param for item in values for param in item]
+            self._updateall(update_query, query_params)
+            return True
         except Exception as e:
-            print(f"Error updating last_receive_time: {e}")
+            logging.error("Error updating last_receive_time: %s", repr(e))
             return False
 
     def delete_alert(self, id):

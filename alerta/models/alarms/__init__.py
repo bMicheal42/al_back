@@ -8,8 +8,8 @@ class Base:
 def load_alarm_model(model):
     try:
         return import_module(f'alerta.models.alarms.{model.lower()}')
-    except Exception:
-        raise ImportError(f'Failed to load {model} alarm model')
+    except Exception as e:
+        raise ImportError(f'Unexpected error while loading {model} alarm model: {str(e)}')
 
 
 class AlarmModel(Base):
