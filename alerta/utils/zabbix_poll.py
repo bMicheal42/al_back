@@ -28,45 +28,58 @@ def zabbix_login():
 def poll_zabbix_events(event_ids):
     zabbix = zabbix_login()
     try:
-        event_ids = event_ids
+        logger.warning(f"event_ids: {event_ids}")
+
         events = zabbix.event.get(
             eventids=event_ids,
             output=['eventid', 'r_eventid'],
-            selectHosts=['hostid', 'name']
+            selectHosts=['hostid', 'name'],
+            selectRelatedObject=['triggerid', 'status']
         )
-        # logger.warning(f"EVENTS: {events}")
+
         event_map = {
             str(event['eventid']): {
                 'eventid': event.get('eventid'),
                 'hosts': event.get('hosts', []),
-                'r_eventid': event.get('r_eventid')
+                'r_eventid': event.get('r_eventid'),
+                'trigger_status': int(event.get('relatedObject', {}).get('status', -1))
             } for event in events
         }
+
+        logger.warning(f"EVENT MAP: {event_map}")
         updated_event_ids = []
+
         for event_id in event_ids:
-            # logger.warning(f"{event_id}")
             if event_id in event_map:
-                # logger.warning(f"was found in Zabbix")
+                logger.warning(f"Event id: {event_id} was found in Zabbix events")
                 event = event_map[event_id]
-                if not event.get('hosts'):
+
+                trigger_status = event.get('trigger_status')
+                has_hosts = bool(event.get('hosts'))
+
+                if trigger_status == 1:
                     updated_event_ids.append(event_id)
-                    # logger.warning(f"Event id: {event_id} was Deleted")
+                    logger.warning(f"Event id: {event_id} — trigger is DISABLED")
+                elif not has_hosts:
+                    updated_event_ids.append(event_id)
+                    logger.warning(f"Event id: {event_id} — host was DELETED")
                 else:
                     try:
-                        r_eventid = str(event.get('r_eventid', 0))
+                        r_eventid = str(event.get('r_eventid', '0'))
                     except Exception as ex:
                         logger.error("Ошибка преобразования r_eventid для события %s: %s", event_id, ex)
                         r_eventid = '0'
+
                     if r_eventid != '0':
                         updated_event_ids.append(event_id)
-                        # logger.warning(f"Event id: {event_id} is in OK state")
-                    # else:
-                        # logger.warning(f"Event id: {event_id} is in ERROR state")
-
+                        logger.warning(f"Event id: {event_id} — is in OK state")
+                    else:
+                        logger.warning(f"Event id: {event_id} — is in ERROR state")
             else:
                 updated_event_ids.append(event_id)
-                # logger.warning(f"Event id: {event_id} was not found in Zabbix events")
-        # logger.warning(f"UPDATED: {updated_event_ids}")
+                logger.warning(f"Event id: {event_id} was not found in Zabbix events")
+
+        logger.warning(f"EVENTS TO CLOSE: {updated_event_ids}")
         return updated_event_ids
 
     except Exception as e:
@@ -87,8 +100,7 @@ def get_error_alerts_older_than():
         group=[]
     )
     try:
-        alerts = Alert.find_all(query=query)
-        # logger.warning(f"OLD ALERTS: {alerts}")
+        alerts = Alert.find_all_really(query=query)
         return alerts
     except Exception as e:
         logger.warning("Ошибка при выборке алертов: %s", e)
@@ -96,19 +108,25 @@ def get_error_alerts_older_than():
 
 
 def set_alerts_status(alerts):
-    from alerta.utils.api import process_status
+    from alerta.utils.api import process_action
 
     updated = []
     errors = []
-    for alert in alerts:
-        try:
-            alert, status, text = process_status(alert, "closed", "auto close by scheduled task")
-        except Exception as e:
-            errors.append(str(e))
-            continue
 
-        if alert.set_status("closed", "auto close by scheduled task"):
-            updated.append(alert.id)
+    for alert in alerts:
+        alert, action, text, timeout, was_updated = process_action(alert, 'close', 'Auto Resolve', timeout=None)
+        if was_updated:
+            try:
+                is_incident = alert.attributes.get('incident', False)
+                if not is_incident:
+                    alert = alert.from_action(action, text, timeout)
+                alert = alert.recalculate_incident_close('closed' if is_incident else None)
+                alert.recalculate_status_durations()
+                alert.update_attributes(alert.attributes)
+                updated.append(alert.id)
+            except Exception as e:
+                errors.append(str(e))
+                continue
 
     if errors:
         logger.error(f"failed to bulk set alert status', errors={errors}")
@@ -136,7 +154,6 @@ def check_alerts_and_close(app):
             attrs = getattr(alert, "attributes", None)
             event_id = attrs.get("zabbix_id")
             event_map.setdefault(event_id, []).append(alert)
-            # logger.warning(f"TEST {alert.id} : {event_id}")
 
         if not event_map:
             logger.info("Нет event_id для обработки.")
@@ -151,10 +168,11 @@ def check_alerts_and_close(app):
             sort="create_time DESC",
             group=[]
         )
-        filtered_alerts = Alert.find_all(query_filtered_alerts)
-        # logger.warning(f"FILTERED ALERTS: {filtered_alerts}")
+        filtered_alerts = Alert.find_all_really(query_filtered_alerts)
+        logger.warning(f"FILTERED ALERTS: {filtered_alerts}")
         if not filtered_alerts:
             logger.warning("No alerts to close")
+            return
 
         g.login = "g.taftin"
         try:

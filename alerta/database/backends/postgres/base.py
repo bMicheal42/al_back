@@ -617,6 +617,7 @@ class Backend(Database):
         """.format(limit=current_app.config['HISTORY_LIMIT'])
         return self._updateone(update, {'id': id, 'like_id': id + '%', 'history': history}, returning=True)
 
+
     def get_alerts(self, query=None, raw_data=False, history=False, page=None, page_size=20):
         query = query or Query()
         if raw_data and history:
@@ -666,6 +667,24 @@ class Backend(Database):
             FROM duplicate_alerts
         """
         return self._fetchall(select, query.vars, limit=page_size*5000, offset=0)
+
+
+    def get_allAlerts(self, query=None):
+        query = query or Query()
+
+        select = """
+            SELECT id, resource, event, environment, severity, correlate, status, service, "group", value, "text",
+                   tags, attributes, origin, type, create_time, timeout, raw_data, customer, duplicate_count, repeat,
+                   previous_severity, trend_indication, receive_time, last_receive_id, last_receive_time, update_time, history
+            FROM alerts
+            WHERE {where}
+            ORDER BY {sort}
+        """.format(
+            where=query.where or 'true',
+            sort=query.sort or 'last_receive_time DESC'
+        )
+        return self._fetchall(select, query.vars)
+
 
     def find_by_ids(self, ids: List[str]):
         if not ids:
@@ -848,6 +867,7 @@ class Backend(Database):
                 ) AS duplicate_alerts,
                 a.status,
                 a.receive_time,
+                (a.attributes->>'wasIncident')::boolean AS was_incident,
                 te.ack_time,
                 te.false_positive_time,
                 te.fixing_time,

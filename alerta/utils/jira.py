@@ -96,7 +96,7 @@ class JiraClient:
             print(f"Error creating JIRA ticket: {e}")
             return None
 
-    def transition_ticket(self, jira_key: str, transition_name: str, resolution: Optional[str] = None):
+    def transition_ticket(self, jira_key: str, transition_name: str, resolution: Optional[str] = None, owner: Optional[str] = None):
         """Transitions a Jira ticket to the specified transition state."""
         try:
             if not self.jira:
@@ -115,7 +115,12 @@ class JiraClient:
                     self.jira.transition_issue(jira_key, transition_id, fields={"resolution": {"name": resolution}})
                 else:
                     logging.warning(f"[JIRA] Making transition for {jira_key} with id: {transition_id}")
-                    self.jira.transition_issue(jira_key, transition_id)
+
+                    JIRA_EXT_OWNERS_GROUPS = app.config['JIRA_EXT_OWNERS_GROUPS']
+                    if owner in JIRA_EXT_OWNERS_GROUPS:   #TODO дописать логику внешний/внутренний департамент
+                        LOG.warning(f" Эскалация на внешний L2: {owner} входит в список JIRA_EXT_OWNERS_GROUPS")
+                    else: # стандартный флоу
+                        self.jira.transition_issue(jira_key, transition_id)
 
                 updated_issue = self.jira.issue(jira_key)
                 new_status = updated_issue.fields.status.name

@@ -192,6 +192,9 @@ class Database(Base):
     def get_alerts(self, query=None, raw_data=False, history=False, page=None, page_size=None):
         raise NotImplementedError
 
+    def get_allAlerts(self, query=None):
+        raise NotImplementedError
+
     def find_by_ids(self, ids: List[str]):
         raise NotImplementedError
 

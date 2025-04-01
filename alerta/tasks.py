@@ -21,8 +21,16 @@ def action_alerts(alerts: List[str], action: str, text: str, timeout: Optional[i
         try:
             g.login = login
             previous_status = alert.status
-            alert, action, text, timeout = process_action(alert, action, text, timeout)
+            # pre action
+            alert, action, text, timeout, was_updated = process_action(alert, action, text, timeout)
+            # update status
             alert = alert.from_action(action, text, timeout)
+            if was_updated:
+                alert = alert.recalculate_incident_close()
+                alert.recalculate_status_durations()
+                alert.update_attributes(alert.attributes)
+            # post action
+            alert, action, text, timeout, was_updated = process_action(alert, action, text, timeout, post_action=True)
         except RejectException as e:
             errors.append(str(e))
             continue
@@ -33,15 +41,15 @@ def action_alerts(alerts: List[str], action: str, text: str, timeout: Optional[i
             errors.append(str(e))
             continue
 
-        if previous_status != alert.status:
-            try:
-                alert, status, text = process_status(alert, alert.status, text)
-                alert = alert.from_status(status, text, timeout)
-            except RejectException as e:
-                errors.append(str(e))
-                continue
-            except Exception as e:
-                errors.append(str(e))
-                continue
+        # if previous_status != alert.status:
+        #     try:
+        #         alert, status, text = process_status(alert, alert.status, text)
+        #         alert = alert.from_status(status, text, timeout)
+        #     except RejectException as e:
+        #         errors.append(str(e))
+        #         continue
+        #     except Exception as e:
+        #         errors.append(str(e))
+        #         continue
 
         updated.append(alert.id)

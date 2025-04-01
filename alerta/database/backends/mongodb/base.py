@@ -518,6 +518,9 @@ class Backend(Database):
             return_document=ReturnDocument.AFTER
         )
 
+    def get_allAlerts(self, query=None):
+        raise NotImplementedError
+
     def get_alerts(self, query=None, raw_data=False, history=False, page=None, page_size=None):
         query = query or Query()
         fields = dict()
