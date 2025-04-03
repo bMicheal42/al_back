@@ -60,9 +60,9 @@ STATUS_MAP = {
     Status.Pending: 'E',
     Status.Escalated: 'F',
     Status.False_positive: 'G',
-    Status.Flap: 'H',
+    # Status.Flap: 'H',
     Status.Closed: 'I',
-    Status.Unknown: 'J'
+    # Status.Unknown: 'J'
 }
 
 
