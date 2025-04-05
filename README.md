@@ -118,7 +118,7 @@ export FLASK_DEBUG=1
 flask run --port 8080
 ```
 
-> **Note**: After starting, the API will be available at http://localhost:8080/api
+> **Note**: After starting, the API will be available at http://localhost:8080/
 
 #### 5. Create admin account
 
