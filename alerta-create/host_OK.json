@@ -1,0 +1,194 @@
+[
+  {
+    "resource": "icmpping", "event": "TST-WEBC-300", "environment": "Production", "severity": "indeterminate", "group": "Zabbix", "value": "Down (0)",
+    "service": [ "Critical/Done", "f1-zbx-prx2", "Maintenance - F1 - Patch-deploy", "!Windows servers", "!Авторегистрация агентов", "!Группа проектов - CP", "Группа проектов - CP", "ИС - IIS", "!Площадка - F1", "Площадка - F1", "Получатели: Админ.платформы [CP]", "Получатели: Дежурная смена", "Проект - CP", "Проект - CP2" ],
+    "text": "Connectivity to host TST-WEBC-300 cannot be established",
+    "tags": [
+      "Application:Status",
+      "Hardware:F2-HOST-322",
+      "InfoSystem:kibana",
+      "Owner_1:af-admins",
+      "ProjectGroup:BB"
+    ],
+    "attributes": {
+      "ip": "10.9.15.10",
+      "thresholdInfo": "Шаблон Комплексный - Windows: max(/TST-WEBC-300/icmpping,#3)=0 and max(/TST-WEBC-300/zabbix[host,agent,available],{$AGENT.TIMEOUT})=0",
+      "zabbix_id": "201",
+      "zabbix_trigger_id": "200",
+      "zabbix_status": "PROBLEM",
+      "zabbix_severity": "Средняя",
+      "zabbix_visible_hostname": "TST-WEBC-300",
+      "zabbix_description": "Недоступна одна из IIS-нод. Инструкция - https://knowledge.sdventures.com/display/RET/CP+Notifications+Monitors"
+    },
+    "origin": "zabbix/co-zbbx-tst",
+    "type": "zabbixAlert"
+  },
+  {
+    "resource": "icmpping", "event": "TST-WEBC-300", "environment": "Production", "severity": "indeterminate", "group": "Zabbix", "value": "Down (0)",
+    "service": [ "Critical/Done", "f1-zbx-prx2", "Insight - CP", "Maintenance - F1 - Patch-deploy", "!Windows servers", "!Авторегистрация агентов", "!Группа проектов - CP", "Группа проектов - CP", "ИС - IIS", "!Площадка - F1", "Площадка - F1", "Получатели: Админ.платформы [CP]", "Получатели: Дежурная смена", "Проект - CP", "Проект - CP2" ],
+    "text": "Host TST-WEBC-300 is currently unresponsive",
+    "tags": [
+      "Application:Status",
+      "Hardware:F2-HOST-322",
+      "InfoSystem:kibana",
+      "Owner_1:AF-admins",
+      "ProjectGroup:BB"
+    ],
+    "attributes": {
+      "ip": "10.9.14.16",
+      "thresholdInfo": "Шаблон Комплексный - Windows: max(/TST-WEBC-300/icmpping,#3)=0 and max(/TST-WEBC-300/zabbix[host,agent,available],{$AGENT.TIMEOUT})=0",
+      "zabbix_id": "202",
+      "zabbix_trigger_id": "200",
+      "zabbix_status": "PROBLEM",
+      "zabbix_severity": "Средняя",
+      "zabbix_visible_hostname": "TST-WEBC-300",
+      "zabbix_description": "Недоступна одна из IIS-нод. Выход из строя одной, двух нод не страшен. Попытаться запустить ноду. Если не получается - уведомить отвественных. Будить отвественных только в случае массового выхода из строя нод и деградации сервисов."
+    },
+    "origin": "zabbix/co-zbbx-tst",
+    "type": "zabbixAlert"
+  },
+  {
+    "resource": "icmpping", "event": "TST-WEBC-300", "environment": "Production", "severity": "warning", "group": "Zabbix", "value": "Slow response",
+    "service": [ "Critical/Done", "f1-zbx-prx2", "Insight - CP", "Maintenance - F1 - Patch-deploy", "!Windows servers", "!Авторегистрация агентов", "!Группа проектов - CP", "Группа проектов - CP", "ИС - IIS", "!Площадка - F1", "Площадка - F1", "Получатели: Админ.платформы [CP]", "Получатели: Дежурная смена", "Проект - CP", "Проект - CP2" ],
+    "text": "Response time for TST-WEBC-300 is higher than acceptable limits",
+    "tags": [
+      "Application:Status",
+      "Hardware:F2-HOST-322",
+      "InfoSystem:kibana",
+      "Owner_1:AF-admins",
+      "ProjectGroup:BB"
+    ],
+    "attributes": {
+      "ip": "10.9.14.17",
+      "thresholdInfo": "Шаблон Комплексный - Windows: max(/TST-WEBC-300/icmpping,#3)>100",
+      "zabbix_id": "203",
+      "zabbix_trigger_id": "200",
+      "zabbix_status": "PROBLEM",
+      "zabbix_severity": "Предупреждение",
+      "zabbix_visible_hostname": "TST-WEBC-300",
+      "zabbix_description": "Высокое время отклика. Проверить работу ноды."
+    },
+    "origin": "zabbix/co-zbbx-tst",
+    "type": "zabbixAlert"
+  },
+  {
+    "resource": "icmpping", "event": "TST-WEBC-300", "environment": "Production", "severity": "indeterminate", "group": "Zabbix", "value": "Down (0)",
+    "service": [ "Critical/Done", "f1-zbx-prx2", "Insight - CP", "Maintenance - F1 - Patch-deploy", "!Windows servers", "!Авторегистрация агентов", "!Группа проектов - CP", "Группа проектов - CP", "ИС - IIS", "!Площадка - F1", "Площадка - F1", "Получатели: Админ.платформы [CP]", "Получатели: Дежурная смена", "Проект - CP", "Проект - CP2" ],
+    "text": "TST-WEBC-300 is unreachable due to a potential network issue",
+    "tags": [
+      "Application:Status",
+      "Hardware:F2-HOST-322",
+      "InfoSystem:kibana",
+      "Owner_1:AF-admins",
+      "ProjectGroup:BB"
+    ],
+    "attributes": {
+      "ip": "10.9.14.23",
+      "thresholdInfo": "Шаблон Комплексный - Windows: max(/TST-WEBC-300/icmpping,#3)=0 and max(/TST-WEBC-300/zabbix[host,agent,available],{$AGENT.TIMEOUT})=0",
+      "zabbix_id": "204",
+      "zabbix_trigger_id": "200",
+      "zabbix_status": "PROBLEM",
+      "zabbix_severity": "Средняя",
+      "zabbix_visible_hostname": "TST-WEBC-300",
+      "zabbix_description": "Недоступна одна из IIS-нод. Проверьте подключение к узлу."
+    },
+    "origin": "zabbix/co-zbbx-tst",
+    "type": "zabbixAlert"
+  },
+  {
+    "resource": "icmpping", "event": "TST-WEBC-300", "environment": "Production", "severity": "indeterminate", "group": "Zabbix", "value": "Down (0)",
+    "service": [ "Critical/Done", "f1-zbx-prx2", "Insight - CP", "Maintenance - F1 - Patch-deploy", "!Windows servers", "!Авторегистрация агентов", "!Группа проектов - CP", "Группа проектов - CP", "ИС - IIS", "!Площадка - F1", "Площадка - F1", "Получатели: Админ.платформы [CP]", "Получатели: Дежурная смена", "Проект - CP", "Проект - CP2" ],
+    "text": "TST-WEBC-300 is not responding to network requests",
+    "tags": [
+      "Application:Status",
+      "Hardware:F2-HOST-322",
+      "InfoSystem:kibana",
+      "Owner_1:AF-admins",
+      "ProjectGroup:BB"
+    ],
+    "attributes": {
+      "ip": "10.9.14.24",
+      "thresholdInfo": "Шаблон Комплексный - Windows: max(/TST-WEBC-300/icmpping,#3)=0 and max(/TST-WEBC-300/zabbix[host,agent,available],{$AGENT.TIMEOUT})=0",
+      "zabbix_id": "205",
+      "zabbix_trigger_id": "200",
+      "zabbix_status": "PROBLEM",
+      "zabbix_severity": "Средняя",
+      "zabbix_visible_hostname": "TST-WEBC-300",
+      "zabbix_description": "Недоступна одна из IIS-нод. Попытайтесь устранить неполадки на узле."
+    },
+    "origin": "zabbix/co-zbbx-tst",
+    "type": "zabbixAlert"
+  },
+  {
+    "resource": "icmpping", "event": "TST-WEBC-300", "environment": "Production", "severity": "indeterminate", "group": "Zabbix", "value": "Down (0)",
+    "service": [ "Critical/Done", "f1-zbx-prx2", "Insight - CP", "Maintenance - F1 - Patch-deploy", "!Windows servers", "!Авторегистрация агентов", "!Группа проектов - CP", "Группа проектов - CP", "ИС - IIS", "!Площадка - F1", "Площадка - F1", "Получатели: Админ.платформы [CP]", "Получатели: Дежурная смена", "Проект - CP", "Проект - CP2" ],
+    "text": "Host TST-WEBC-300 is currently offline",
+    "tags": [
+      "Application:Status",
+      "Hardware:F2-HOST-322",
+      "InfoSystem:kibana",
+      "Owner_1:AF-admins",
+      "ProjectGroup:BB"
+    ],
+    "attributes": {
+      "ip": "10.9.14.25",
+      "thresholdInfo": "Шаблон Комплексный - Windows: max(/TST-WEBC-300/icmpping,#3)=0 and max(/TST-WEBC-300/zabbix[host,agent,available],{$AGENT.TIMEOUT})=0",
+      "zabbix_id": "206",
+      "zabbix_trigger_id": "200",
+      "zabbix_status": "PROBLEM",
+      "zabbix_severity": "Средняя",
+      "zabbix_visible_hostname": "TST-WEBC-300",
+      "zabbix_description": "Недоступна одна из IIS-нод. Узел не отвечает."
+    },
+    "origin": "zabbix/co-zbbx-tst",
+    "type": "zabbixAlert"
+  },
+  {
+    "resource": "icmpping", "event": "TST-WEBC-300", "environment": "Production", "severity": "indeterminate", "group": "Zabbix", "value": "Down (0)",
+    "service": [ "Critical/Done", "f1-zbx-prx2", "Insight - CP", "Maintenance - F1 - Patch-deploy", "!Windows servers", "!Авторегистрация агентов", "!Группа проектов - CP", "Группа проектов - CP", "ИС - IIS", "!Площадка - F1", "Площадка - F1", "Получатели: Админ.платформы [CP]", "Получатели: Дежурная смена", "Проект - CP", "Проект - CP2" ],
+    "text": "Unable to reach host TST-WEBC-300; potential network problem detected",
+    "tags": [
+      "Application:Status",
+      "Hardware:F2-HOST-322",
+      "InfoSystem:kibana",
+      "Owner_1:AF-admins",
+      "ProjectGroup:BB"
+    ],
+    "attributes": {
+      "ip": "10.9.14.26",
+      "thresholdInfo": "Шаблон Комплексный - Windows: max(/TST-WEBC-300/icmpping,#3)=0 and max(/TST-WEBC-300/zabbix[host,agent,available],{$AGENT.TIMEOUT})=0",
+      "zabbix_id": "207",
+      "zabbix_trigger_id": "200",
+      "zabbix_status": "PROBLEM",
+      "zabbix_severity": "Средняя",
+      "zabbix_visible_hostname": "TST-WEBC-300",
+      "zabbix_description": "Недоступна одна из IIS-нод. Нет связи с хостом."
+    },
+    "origin": "zabbix/co-zbbx-tst",
+    "type": "zabbixAlert"
+  },
+  {
+    "resource": "icmpping", "event": "TST-WEBC-300", "environment": "Production", "severity": "indeterminate", "group": "Zabbix", "value": "Down (0)",
+    "service": [ "Critical/Done", "f1-zbx-prx2", "Insight - CP", "Maintenance - F1 - Patch-deploy", "!Windows servers", "!Авторегистрация агентов", "!Группа проектов - CP", "Группа проектов - CP", "ИС - IIS", "!Площадка - F1", "Площадка - F1", "Получатели: Админ.платформы [CP]", "Получатели: Дежурная смена", "Проект - CP", "Проект - CP2" ],
+    "text": "Host TST-WEBC-300 is not responding; please check its status",
+    "tags": [
+      "Application:Status",
+      "Hardware:F2-HOST-322",
+      "InfoSystem:kibana",
+      "Owner_1:AF-admins",
+      "ProjectGroup:BB"
+    ],
+    "attributes": {
+      "ip": "10.9.14.27",
+      "thresholdInfo": "Шаблон Комплексный - Windows: max(/TST-WEBC-300/icmpping,#3)=0 and max(/TST-WEBC-300/zabbix[host,agent,available],{$AGENT.TIMEOUT})=0",
+      "zabbix_id": "208",
+      "zabbix_trigger_id": "200",
+      "zabbix_status": "PROBLEM",
+      "zabbix_severity": "Средняя",
+      "zabbix_visible_hostname": "TST-WEBC-300",
+      "zabbix_description": "Недоступна одна из IIS-нод. Хост не отвечает на запросы."
+    },
+    "origin": "zabbix/co-zbbx-tst",
+    "type": "zabbixAlert"
+  }
+]
