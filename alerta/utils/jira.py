@@ -34,54 +34,63 @@ class JiraClient:
             self.jira = None  # Prevent connection attempts
             return None
 
-        print(f"_connect to JIRA_URL {JIRA_URL} via JIRA_USER: {JIRA_USER}")
+        LOG.info(f"_connect to JIRA_URL {JIRA_URL} via JIRA_USER: {JIRA_USER}")
         return JIRA(
             options={'server': JIRA_URL, 'timeout': '4', 'max_retries': '4', 'verify': True},
             basic_auth=(JIRA_USER, JIRA_PWD)
         )
 
-    def create_ticket(self, args: Dict[str, str], project: str = None, infosystem: str = None, projectgroup: str = None):
+    def create_ticket(self, args: Dict[str, str], infosystem: str = None, projectgroup: str = None):
         """Creates a JIRA ticket based on the given parameters."""
-        # FIXME not used for now..
-        # JIRA_SEVERITY = app.config['JIRA_SEVERITY']
-        logging.warning(f"[JIRA] Creating ticket: {json.dumps(args, indent=4, ensure_ascii=False)}")
+
         JIRA_PROJECTGROUPS = app.config['JIRA_PROJECTGROUPS']
         JIRA_OWNERS_GROUPS = app.config['JIRA_OWNERS_GROUPS']
+        JIRA_SEVERITY_LEVEL = app.config['JIRA_SEVERITY_LEVEL']
+        JIRA_CRITICAL = app.config['JIRA_CRITICAL']
+        JIRA_PROJECT = app.config['JIRA_PROJECT']
 
         if not projectgroup or not projectgroup in JIRA_PROJECTGROUPS:
             projectgroup = 'Other'
-        if not infosystem:
-            infosystem = 'other'
-        if not project:
-            project = app.config['JIRA_PROJECT']
+
+        if not self.jira:
+            logging.warning("Not connected to JIRA, skipping ticket creation")
+            return None
 
         try:
-            if not self.jira:
-                LOG.warning(f"Not connected to JIRA, skipping ticket creation")
-                return None
+            severity = args.get('severity', 'medium')
+            severity_field_value = JIRA_SEVERITY_LEVEL[severity]
 
-            owner_1 = args.get('Owner_1', '')
-            owner_2 = args.get('Owner_2', '')
-            escalation_group1 = JIRA_OWNERS_GROUPS.get(owner_1, 'JIRA_Duty-engineers-team')
-            escalation_group2 = JIRA_OWNERS_GROUPS.get(owner_2, '')
-            username = 'a.skhomenko' if args['username'] == 'alertademo' else args['username']
+            tags = args.get('eventtags')
+            if tags and "Host:nonCritical" in tags:
+                host_critical = '0'
+            else:
+                host_critical = '1'
+            host_critical_field_value = JIRA_CRITICAL[host_critical]
+
+            host =  args.get('host', 'NO HOST')
+            owner_1 = args.get('Owner_1', 'zbx-admins')
+            owner_2 = args.get('Owner_2', None)
+
+            escalation_group1 = JIRA_OWNERS_GROUPS.get(owner_1, 'JIRA_Monitoring-development-team')
+            escalation_group2 = JIRA_OWNERS_GROUPS.get(owner_2, None)
+
+            username = args.get('username', 'g.taftin') # в идеале проверять что логин есть в Jira (дорого по времени)
 
             ticket = self.jira.create_issue(
-                project=project,
-                summary=f"{args['host']}: {args['text']}",
-                description=json.dumps({'attributes': args['attributes'], 'tags': args['tags']}, indent=4, ensure_ascii=False),
+                project=JIRA_PROJECT,
+                summary=f"{args.get('host', 'No Host')}: {args.get('text', 'No Text')}",
+                description="incident created by Alerta",
                 issuetype={'name': 'Incident'},
-                #assignee={'name': args.username},
-                #reporter={'name': args.username},
+                assignee={'name': username},
                 customfield_19702={'name': 'JIRA_Duty-engineers-team'},   # Workgroup
                 customfield_19819={'value': projectgroup},                # Project Group // AF CP Lab RETN
-                # customfield_11915=[infosystem],                         # Info System // jira not accepting..
+                customfield_13251={'id': severity_field_value},
+                customfield_19949={'id': host_critical_field_value},
                 customfield_19502=[{'key': 'SC-39772'}],                  # Service ZBX Incident
-                customfield_19832={'name': username},                     # MonSpec
-                customfield_19823=args['host'],                           # Host
-                customfield_19920=args['Owner_1'],                        # Slack Group
-                customfield_19921=args['Owner_2'],                        # Reserve Slack Group
-                customfield_19918=escalation_group1,                      # Escalation Group
+                customfield_19823=host,                                   # Host
+                customfield_19920=owner_1,                                # Slack Group
+                customfield_19921=owner_2,                                # Reserve Slack Group
+                customfield_19918=escalation_group1,                      # Escalation Group № 161 чекает
                 customfield_19919=escalation_group2,                      # Reserve Escalation Group
             )
             ticket_fields = {
@@ -92,45 +101,34 @@ class JiraClient:
             }
             logging.warning(f"[JIRA] Created ticket: {ticket_fields.get('url', '')}")
             return ticket_fields
-        except JIRAError as e:
-            print(f"Error creating JIRA ticket: {e}")
-            return None
 
-    def transition_ticket(self, jira_key: str, transition_name: str, resolution: Optional[str] = None, owner: Optional[str] = None):
-        """Transitions a Jira ticket to the specified transition state."""
+        except JIRAError as e:
+            error_text = ''
+            if e.response is not None:
+                try:
+                    error_text = e.response.text
+                except Exception as parse_err:
+                    error_text = f'Не удалось получить тело ответа: {parse_err}'
+
+            LOG.error(f"Error creating JIRA ticket: {e.status_code} - {e.text if hasattr(e, 'text') else ''}")
+            LOG.error(f"Response content: {error_text}")
+        return None
+
+
+    def transition_ticket(self, jira_key: str, transition_id: str):
+        LOG.info(f"[JIRA] Attempting to transition JIRA ticket '{jira_key}' with transition ID '{transition_id}'")
+
+        if not self.jira:
+            LOG.error("[JIRA] client not initialized, aborting ticket transition.")
+            return False, None
         try:
-            if not self.jira:
-                LOG.warning(f"Not connected to JIRA, skipping ticket transition")
-                return None
+            self.jira.transition_issue(jira_key, transition_id)
+            updated_issue = self.jira.issue(jira_key)
+            new_status = updated_issue.fields.status.name
 
-            # Get available transitions for the ticket
-            transitions = {} if resolution else self.jira.transitions(jira_key)
-            available_transitions = {transition['name']: transition['id'] for transition in transitions}
-
-            # Check if the requested transition is available (or bypass it if resolution is passed)
-            if transition_name in available_transitions or resolution:
-                transition_id = '261' if resolution else available_transitions[transition_name]
-                if resolution:
-                    logging.warning(f"[JIRA] Making transition for {jira_key} with id: {transition_id}, resolution: {resolution}")
-                    self.jira.transition_issue(jira_key, transition_id, fields={"resolution": {"name": resolution}})
-                else:
-                    logging.warning(f"[JIRA] Making transition for {jira_key} with id: {transition_id}")
-
-                    JIRA_EXT_OWNERS_GROUPS = app.config['JIRA_EXT_OWNERS_GROUPS']
-                    if owner in JIRA_EXT_OWNERS_GROUPS:   #TODO дописать логику внешний/внутренний департамент
-                        LOG.warning(f" Эскалация на внешний L2: {owner} входит в список JIRA_EXT_OWNERS_GROUPS")
-                    else: # стандартный флоу
-                        self.jira.transition_issue(jira_key, transition_id)
-
-                updated_issue = self.jira.issue(jira_key)
-                new_status = updated_issue.fields.status.name
-                logging.warning(f"[JIRA] Transitioned {jira_key} with '{transition_id}' to status: {new_status}")
-
-                return True, new_status
-            else:
-                LOG.warning(f"[JIRA] Transition '{transition_name}' not available for ticket {jira_key}")
-                return False, None
+            LOG.info(f"[JIRA] Ticket '{jira_key}' transitioned successfully to status '{new_status}'")
+            return True, new_status
 
         except JIRAError as e:
-            LOG.warning(f"Error during JIRA transition for ticket {jira_key}: {e}")
-            return None, None
+            LOG.error(f"[JIRA] Failed to transition JIRA ticket '{jira_key}': {e}")
+            return False, None
