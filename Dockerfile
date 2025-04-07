@@ -14,6 +14,8 @@ LABEL org.opencontainers.image.description="Alerta API (dev)" \
       org.opencontainers.image.licenses=Apache-2.0
 
 ENV ALERTA_ENDPOINT=http://localhost:8080
+ENV ZABBIX_USER=dd-zapi-user
+ENV ZABBIX_PASSWORD=FGsmaq77l1-Rgf41i2I0
 
 RUN apt-get update && \
     apt-get upgrade -y && \
@@ -47,4 +49,5 @@ RUN pip install alerta
 
 EXPOSE 8080
 ENV FLASK_SKIP_DOTENV=1
-CMD ["alertad", "run", "--host", "0.0.0.0", "--port", "8080"]
+
+CMD ["flask", "run", "--host=0.0.0.0", "--port=8080"]

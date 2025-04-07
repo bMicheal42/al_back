@@ -80,12 +80,20 @@ def bulk_action_alert():
     action = request.json.get('action', None)
     text = request.json.get('text', 'bulk status update')
     timeout = request.json.get('timeout', None)
+    alerts = request.json.get('alert_ids', [])
+
+    # validate alert_ids
+    if not isinstance(alerts, list):
+        raise ApiError("must supply 'alert_ids' as json list", 400)
+    if not all(isinstance(alert_id, str) for alert_id in alerts):
+        raise ApiError("all alert_ids must be strings", 400)
 
     if not action:
         raise ApiError("must supply 'action' as json data", 400)
 
-    query = qb.alerts.from_params(request.args)
-    alerts = [alert.id for alert in Alert.find_all(query)]
+    # old stuff from author
+    # query = qb.alerts.from_params(request.args)
+    # alerts = [alert.id for alert in Alert.find_all(query)]
 
     if not alerts:
         raise ApiError('not found', 404)

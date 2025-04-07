@@ -763,6 +763,10 @@ class Alert:
         return [Alert.from_db(alert) for alert in db.get_alerts(query, raw_data, history, page, page_size)]
 
     @staticmethod
+    def find_all_really(query: Query = None) -> List['Alert']:
+        return [Alert.from_db(alert) for alert in db.get_allAlerts(query)]
+
+    @staticmethod
     def find_by_ids(ids: List[str]) -> List['Alert']:
         """
         Find alerts by a list of alert IDs.

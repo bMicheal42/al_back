@@ -30,25 +30,56 @@ class Plugins:
     def register(self, app: Flask) -> None:
         self.config = app.config
 
+        banner = '\n' + '='*60 + '\n' + 'ALERTA PLUGINS INITIALIZATION' + '\n' + '='*60
+        print(banner)
+        LOG.warning(banner)  # Using warning to ensure visibility with default log level
+        
+        # Find all available plugins
         entry_points = {}
+        available_plugins = []
         for ep in iter_entry_points('alerta.plugins'):
             LOG.debug(f"Server plugin '{ep.name}' found.")
             entry_points[ep.name] = ep
-
+            available_plugins.append(ep.name)
+        
+        plugins_info = f"Available plugins: {', '.join(available_plugins)}"
+        print(plugins_info)
+        LOG.warning(plugins_info)
+        
+        enabled_info = f"Enabled plugins: {', '.join(self.config['PLUGINS'])}"
+        print(enabled_info)
+        LOG.warning(enabled_info)
+        
+        # Load enabled plugins
         for name in self.config['PLUGINS']:
             try:
                 plugin = entry_points[name].load()
                 if plugin:
                     self.plugins[name] = plugin()
-                    LOG.info(f"Server plugin '{name}' loaded.")
+                    success_msg = f"✓ Successfully loaded plugin '{name}'"
+                    print(success_msg)
+                    LOG.warning(success_msg)
             except Exception as e:
-                LOG.error(f"Failed to load plugin '{name}': {str(e)}")
-        LOG.info(f"All server plugins enabled: {', '.join(self.plugins.keys())}")
+                error_msg = f"✗ Failed to load plugin '{name}': {str(e)}"
+                print(error_msg)
+                LOG.error(error_msg)
+
+        # Log summary
+        summary = (
+            '\n' + '='*60 + '\n' + 
+            f"Total plugins: available={len(available_plugins)}, enabled={len(self.config['PLUGINS'])}, loaded={len(self.plugins)}" +
+            '\n' + '='*60
+        )
+        print(summary)
+        LOG.warning(summary)
+
         try:
             routing_dist = self.config['ROUTING_DIST']
             self.rules = load_entry_point(routing_dist, 'alerta.routing', 'rules')  # type: ignore
         except (DistributionNotFound, ImportError):
-            LOG.info('No plugin routing rules found. All plugins will be evaluated.')
+            no_rules_msg = 'No plugin routing rules found. All plugins will be evaluated.'
+            print(no_rules_msg)
+            LOG.warning(no_rules_msg)
 
     def routing(self, alert: 'Alert') -> 'Tuple[Iterable[PluginBase], Config]':
         try:

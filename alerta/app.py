@@ -21,7 +21,12 @@ from alerta.utils.plugin import Plugins
 from alerta.utils.tracing import Tracing
 from alerta.utils.webhook import CustomWebhooks
 from alerta.version import __version__
+from flask_apscheduler import APScheduler
 
+import logging
+from datetime import datetime, timedelta
+from pyzabbix import ZabbixAPI
+import time
 # Sentry will read the DSN from SENTRY_DSN environment variable.
 sentry_sdk.init(integrations=[FlaskIntegration()], release=__version__)
 
@@ -47,6 +52,8 @@ custom_webhooks = CustomWebhooks()
 
 def create_app(config_override: Dict[str, Any] = None, environment: str = None) -> Flask:
     app = Flask(__name__)
+    scheduler = APScheduler()
+
     app.config['ENVIRONMENT'] = environment
     config.init_app(app)
     app.config.update(config_override or {})
@@ -89,6 +96,9 @@ def create_app(config_override: Dict[str, Any] = None, environment: str = None) 
 
     from alerta.management import mgmt
     app.register_blueprint(mgmt)
+
+    from alerta.utils import init_zabbix_poll
+    init_zabbix_poll(app)
 
     return app
 

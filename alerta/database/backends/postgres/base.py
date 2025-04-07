@@ -523,27 +523,19 @@ class Backend(Database):
             return True  # nothing to update
 
         try:
-            values = [
-                (update['id'], json.dumps(update['attributes'])) for update in updates
-            ]
-
-            values_sql = ', '.join(
-                f"('{item[0]}', '{item[1]}'::jsonb)" for item in values
-            )
-
+            values = [(update['id'], json.dumps(update['attributes'])) for update in updates]
+            values_sql = ', '.join(["(%s, %s::jsonb)"] * len(values))
             update_query = f"""
                 UPDATE alerts
                 SET attributes = attributes || data.new_attrs
                 FROM (VALUES {values_sql}) AS data(id, new_attrs)
                 WHERE alerts.id = data.id
-                RETURNING alerts.id
             """
-
-            result = self._updateall(update_query, {}, returning=True)
-
-            return bool(result)
+            query_params = [param for item in values for param in item]
+            self._updateall(update_query, query_params)
+            return True
         except Exception as e:
-            print(f"Error updating attributes: {e}")
+            logging.error("Error updating attributes: %s", repr(e))
             return False
 
     def mass_update_last_receive_time(self, updates: List[Dict[str, Any]]) -> bool:
@@ -552,21 +544,18 @@ class Backend(Database):
 
         try:
             values = [(update["id"], update["last_receive_time"]) for update in updates]
-
-            values_str = ", ".join(f"('{id}', '{time}')" for id, time in values)
-
+            values_sql = ', '.join(["(%s, %s)"] * len(values))
             update_query = f"""
                 UPDATE alerts
                 SET last_receive_time = data.new_time::timestamp
-                FROM (VALUES {values_str}) AS data(id, new_time)
+                FROM (VALUES {values_sql}) AS data(id, new_time)
                 WHERE alerts.id = data.id
-                RETURNING alerts.id
             """
-
-            result = self._updateall(update_query, [], returning=True)
-            return bool(result)
+            query_params = [param for item in values for param in item]
+            self._updateall(update_query, query_params)
+            return True
         except Exception as e:
-            print(f"Error updating last_receive_time: {e}")
+            logging.error("Error updating last_receive_time: %s", repr(e))
             return False
 
     def delete_alert(self, id):
@@ -628,6 +617,7 @@ class Backend(Database):
         """.format(limit=current_app.config['HISTORY_LIMIT'])
         return self._updateone(update, {'id': id, 'like_id': id + '%', 'history': history}, returning=True)
 
+
     def get_alerts(self, query=None, raw_data=False, history=False, page=None, page_size=20):
         query = query or Query()
         if raw_data and history:
@@ -677,6 +667,24 @@ class Backend(Database):
             FROM duplicate_alerts
         """
         return self._fetchall(select, query.vars, limit=page_size*5000, offset=0)
+
+
+    def get_allAlerts(self, query=None):
+        query = query or Query()
+
+        select = """
+            SELECT id, resource, event, environment, severity, correlate, status, service, "group", value, "text",
+                   tags, attributes, origin, type, create_time, timeout, raw_data, customer, duplicate_count, repeat,
+                   previous_severity, trend_indication, receive_time, last_receive_id, last_receive_time, update_time, history
+            FROM alerts
+            WHERE {where}
+            ORDER BY {sort}
+        """.format(
+            where=query.where or 'true',
+            sort=query.sort or 'last_receive_time DESC'
+        )
+        return self._fetchall(select, query.vars)
+
 
     def find_by_ids(self, ids: List[str]):
         if not ids:
@@ -859,6 +867,7 @@ class Backend(Database):
                 ) AS duplicate_alerts,
                 a.status,
                 a.receive_time,
+                (a.attributes->>'wasIncident')::boolean AS was_incident,
                 te.ack_time,
                 te.false_positive_time,
                 te.fixing_time,

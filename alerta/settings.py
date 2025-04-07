@@ -31,11 +31,12 @@ QUERY_LIMIT = 50
 DEFAULT_PAGE_SIZE = QUERY_LIMIT  # maximum number of alerts returned by a single query
 HISTORY_LIMIT = 100  # cap the number of alert history entries
 HISTORY_ON_VALUE_CHANGE = True  # history entry for duplicate alerts if value changes
-PATTERN_GROUPING_TIME_WINDOW = 900  # seconds
+PATTERN_GROUPING_TIME_WINDOW = 0  # seconds
 
 # JIRA CONFIGS
 JIRA_URL = 'https://issues.sdventures.com'
-JIRA_PROJECT = 'SDCOPY'
+JIRA_PROJECT = 'SD'
+
 JIRA_SEVERITY = {
     '0': '11324',
     '1': '11325',
@@ -83,6 +84,24 @@ JIRA_OWNERS_GROUPS = {
     'ssl-team':           'JIRA_Domains-support-team',
     'zbx-admins':         'JIRA_Monitoring-development-team'
 }
+
+JIRA_EXT_OWNERS_GROUPS = [
+    "af-pm",
+    "cp-automation",
+    "cp-devops",
+    "cp-frontend-core-team-leads",
+    "cp-pm",
+    "deliverability-experts",
+    "infosec",
+    "jira-admins",
+    "np-pm",
+    "rc-ml-members",
+    "terra-alert",
+    "terra-pm",
+    "uber-admins",
+    "videoservices_devops"
+]
+
 JIRA_USER = ''
 JIRA_PWD = ''
 
@@ -98,11 +117,11 @@ MONGO_DATABASE = None  # can be used to override default database, above
 MONGO_RAISE_ON_ERROR = True
 
 # PostgreSQL (deprecated, use DATABASE_URL setting)
-POSTGRES_URI = 'postgres://localhost:5432/monitoring'  # not used (use DATABASE_URL)
+POSTGRES_URI = 'postgres://postgres:postgres@localhost:5432/monitoring'  # not used (use DATABASE_URL)
 POSTGRES_DB = None
 
 # Database
-DATABASE_URL = MONGO_URI  # default: MongoDB
+DATABASE_URL = POSTGRES_URI  # default: MongoDB
 DATABASE_NAME = MONGO_DATABASE or POSTGRES_DB
 DATABASE_RAISE_ON_ERROR = MONGO_RAISE_ON_ERROR  # True - terminate, False - ignore and continue
 DATABASE_SCHEMA = 'public'  # default: None to use default schema
@@ -260,8 +279,8 @@ ACK_TIMEOUT = 0  # auto-unack alerts after x seconds (0 seconds = do not auto-un
 SHELVE_TIMEOUT = 7200  # auto-unshelve alerts after x seconds (0 seconds = do not auto-unshelve)
 
 # Housekeeping settings
-DELETE_EXPIRED_AFTER = 2 * 60 * 60  # seconds (0 = do not delete)
-DELETE_INFO_AFTER = 12 * 60 * 60  # seconds (0 = do not delete)
+DELETE_EXPIRED_AFTER = 0  # seconds (0 = do not delete)
+DELETE_INFO_AFTER = 0  # seconds (0 = do not delete)
 
 # Send verification emails to new BasicAuth users
 EMAIL_VERIFICATION = False
