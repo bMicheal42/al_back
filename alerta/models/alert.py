@@ -726,7 +726,7 @@ class Alert:
                 logging.debug(f"[close recalculation] 4 parent [{parent.id}] status={parent.status}")
                 self.attributes['zabbix_resolved'] = True
                 if all_childs_resolved or not children:
-                    return self.from_action('close', 'Resolved inc alert from zabbix', timeout=None)
+                    return self.from_action('close', 'Auto ', timeout=None)
                 else:
                     self.set_status(self.status, text='Resolved inc alert from zabbix')
                     return self

@@ -267,6 +267,8 @@ class StateMachine(AlarmModel):
             if action == Action.ESC:
                 self.jira_transition(alert, '161')
                 return next_state('PEN-1', current_severity, Status.Pending)
+            elif action == Action.AIDONE: # TODO for several AI done during observation
+                return next_state('OBS-2', current_severity, current_status)
 
         if state == Status.Shelved:
             if action == Action.OPEN:

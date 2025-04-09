@@ -130,5 +130,5 @@ class JiraClient:
             return True, new_status
 
         except JIRAError as e:
-            LOG.error(f"[JIRA] Failed to transition JIRA ticket '{jira_key}': {e}")
+            LOG.error(f"[JIRA] Failed to transition JIRA ticket '{jira_key}' to transition_id '{transition_id}': {e}")
             return False, None

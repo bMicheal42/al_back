@@ -43,8 +43,6 @@ class AckedBy(PluginBase):
 
     def post_action(self, alert, action, text, **kwargs):
         if action == 'inc' and g.login:
-            logging.debug("Incident action")
-            logging.warning(alert)
             params = {
                 'attributes': json.dumps(alert.attributes),
                 'severity': alert.severity,

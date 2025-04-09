@@ -60,9 +60,9 @@ JIRA_PROJECTGROUPS = [
 
 JIRA_OWNERS_GROUPS = {
     'af-admins':          'JIRA_AsD-&-AF-operation-team',
-    'cp-admins':          'JIRA_CP-operational-team',
-    'cp-front-admins':    'JIRA_CP-operational-team',
-    'cp-sre':             'JIRA_CP-operational-team',
+    'cp-admins':          'JIRA_CP-support-team',
+    'cp-front-admins':    'JIRA_CP-support-team',
+    'cp-sre':             'JIRA_CP-support-team',
     'dba':                'JIRA_Database-administrators-team',
     'domain-admin':       'JIRA_Domains-support-team',
     'eva-ai-mlops':       'JIRA-Lab-Operational-Team',
