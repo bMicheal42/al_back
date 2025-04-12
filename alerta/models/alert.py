@@ -726,9 +726,9 @@ class Alert:
                 logging.debug(f"[close recalculation] 4 parent [{parent.id}] status={parent.status}")
                 self.attributes['zabbix_resolved'] = True
                 if all_childs_resolved or not children:
-                    return self.from_action('close', 'Auto ', timeout=None)
+                    return self.from_action('close', 'Ma alert was closed BUT ', timeout=None)
                 else:
-                    self.set_status(self.status, text='Resolved inc alert from zabbix')
+                    self.set_status(self.status, text='alert was')
                     return self
 
         return self
@@ -996,3 +996,25 @@ class Alert:
 
     def from_timeout(self, text: str = '', timeout: int = None):
         return self.from_action(action='timeout', text=text, timeout=timeout)
+
+    # add history entry
+    @staticmethod
+    def add_history(alert_id, history):
+        return db.add_history(alert_id, history)
+        
+    # mass update status
+    @staticmethod
+    def mass_update_status(alert_ids, status, timeout, update_time):
+        """
+        Массовое обновление статусов для списка алертов.
+        
+        :param alert_ids: Список ID алертов для обновления
+        :param status: Новый статус
+        :param timeout: Значение таймаута
+        :param update_time: Время обновления
+        :return: Список ID обновленных алертов
+        """
+        if not alert_ids:
+            return []
+            
+        return db.mass_update_status(alert_ids, status, timeout, update_time)

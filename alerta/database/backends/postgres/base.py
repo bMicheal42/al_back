@@ -558,6 +558,41 @@ class Backend(Database):
             logging.error("Error updating last_receive_time: %s", repr(e))
             return False
 
+    def mass_update_status(self, alert_ids, status, timeout, update_time):
+        """
+        Массовое обновление статусов для списка алертов
+        
+        :param alert_ids: Список ID алертов для обновления
+        :param status: Новый статус
+        :param timeout: Значение таймаута
+        :param update_time: Время обновления
+        :return: Список ID обновленных алертов
+        """
+        if not alert_ids:
+            return []
+        
+        try:
+            # Преобразуем список ID в строку для SQL запроса
+            placeholders = ','.join(['%s'] * len(alert_ids))
+            
+            # Запрос для обновления статусов нескольких алертов одновременно
+            update_query = f"""
+                UPDATE alerts
+                SET status=%s, timeout=%s, update_time=%s
+                WHERE id IN ({placeholders})
+                RETURNING id
+            """
+            
+            # Подготавливаем параметры запроса
+            query_params = [status, timeout, update_time] + alert_ids
+            
+            # Выполняем запрос и возвращаем список обновленных ID
+            result = self._updateall(update_query, query_params, returning=True)
+            return [row[0] for row in result]
+        except Exception as e:
+            logging.error("Error in mass_update_status: %s", repr(e))
+            return []
+
     def delete_alert(self, id):
         delete = """
             DELETE FROM alerts

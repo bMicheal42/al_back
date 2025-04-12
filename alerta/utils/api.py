@@ -197,10 +197,8 @@ def process_action(alert: Alert, action: str, text: str, timeout: int = None, po
             break
         try:
             if post_action:
-                logging.debug('Posting action: %s', action)
                 updated = plugin.post_action(alert, action, text, timeout=timeout, config=wanted_config)
             else:
-                logging.debug('Not posting action: %s', action)
                 updated = plugin.take_action(alert, action, text, timeout=timeout, config=wanted_config)
         except NotImplementedError:
             pass  # plugin does not support take_action() method or post_action() method

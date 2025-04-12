@@ -202,6 +202,11 @@ def action_alert(alert_id):
         if was_updated:
             alert = alert.recalculate_incident_close()
             alert.recalculate_status_durations()
+            
+            # Добавляем атрибут 'acked-by' при действии ack
+            if action == 'ack':
+                alert.attributes['acked-by'] = g.login
+                
             alert.update_attributes(alert.attributes)
         # post action
         g_data = {

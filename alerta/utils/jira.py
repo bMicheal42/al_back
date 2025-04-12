@@ -112,7 +112,7 @@ class JiraClient:
 
             LOG.error(f"Error creating JIRA ticket: {e.status_code} - {e.text if hasattr(e, 'text') else ''}")
             LOG.error(f"Response content: {error_text}")
-        return None
+            return None
 
 
     def transition_ticket(self, jira_key: str, transition_id: str):

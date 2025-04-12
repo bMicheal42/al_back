@@ -75,7 +75,7 @@ def bulk_set_status():
 @timer(status_timer)
 @jsonp
 def bulk_action_alert():
-    from alerta.tasks import action_alerts
+    from alerta.tasks import action_alerts, mass_action
 
     action = request.json.get('action', None)
     text = request.json.get('text', 'bulk status update')
@@ -91,16 +91,17 @@ def bulk_action_alert():
     if not action:
         raise ApiError("must supply 'action' as json data", 400)
 
-    # old stuff from author
-    # query = qb.alerts.from_params(request.args)
-    # alerts = [alert.id for alert in Alert.find_all(query)]
-
     if not alerts:
         raise ApiError('not found', 404)
 
-    task = action_alerts.delay(alerts, action, text, timeout, g.login)
-
-    return jsonify(status='ok', message=f'{len(alerts)} alerts queued for action'), 202, {'Location': absolute_url('/_bulk/task/' + task.id)}
+    # Для действий 'ack' и 'false-positive' используем оптимизированный массовый подход
+    if action in ['ack', 'false-positive']:
+        mass_action(alerts, action, text, timeout, g.login)
+        return jsonify(status='ok', message=f'{len(alerts)} alerts processed with bulk {action}'), 200
+    
+    # Для всех остальных действий (включая 'inc') также используем синхронный вызов
+    action_alerts(alerts, action, text, timeout, g.login)
+    return jsonify(status='ok', message=f'{len(alerts)} alerts processed with {action}'), 200
 
 
 @api.route('/_bulk/alerts/tag', methods=['OPTIONS', 'PUT'])

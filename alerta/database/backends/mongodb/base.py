@@ -492,6 +492,47 @@ class Backend(Database):
     def mass_update_last_receive_time(self, updates: List[Dict[str, Any]]) -> bool:
         raise NotImplementedError
 
+    def mass_update_status(self, alert_ids, status, timeout, update_time):
+        """
+        Массовое обновление статусов для списка алертов
+        
+        :param alert_ids: Список ID алертов для обновления
+        :param status: Новый статус
+        :param timeout: Значение таймаута
+        :param update_time: Время обновления
+        :return: Список ID обновленных алертов
+        """
+        if not alert_ids:
+            return []
+            
+        try:
+            # Создаем regex выражения для каждого ID, учитывая префиксы
+            id_conditions = [{'_id': {'$regex': '^' + alert_id}} for alert_id in alert_ids]
+            
+            # Формируем условие поиска для всех алертов
+            query = {'$or': id_conditions}
+            
+            # Обновляем статусы, таймауты и время обновления
+            update = {
+                '$set': {
+                    'status': status,
+                    'timeout': timeout,
+                    'updateTime': update_time
+                }
+            }
+            
+            # Получаем список ID алертов до обновления для возврата
+            updated_alerts = list(self.get_db().alerts.find(query, projection={'_id': 1}))
+            
+            # Выполняем массовое обновление
+            self.get_db().alerts.update_many(query, update)
+            
+            # Возвращаем ID обновленных алертов
+            return [alert['_id'] for alert in updated_alerts]
+        except Exception as e:
+            logging.error("Error in mass_update_status: %s", repr(e))
+            return []
+
     def delete_alerts(self, query=None):
         query = query or Query()
         deleted = list(self.get_db().alerts.find(query.where, projection={'_id': 1}))

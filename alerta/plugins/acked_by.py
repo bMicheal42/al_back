@@ -26,20 +26,18 @@ class AckedBy(PluginBase):
         return
 
     def status_change(self, alert, status, text, **kwargs):
-
         if status == 'open':
             alert.attributes['acked-by'] = None
         return alert
 
     def take_action(self, alert, action, text, **kwargs):
+        return
+        # if action == 'ack' and g.login:
+        #     # watch = 'watch:' + g.login
+        #     # alert.tags.append(watch)
+        #     alert.attributes['acked-by'] = g.login
+        # return alert
 
-        if action == 'ack' and g.login:
-            watch = 'watch:' + g.login
-            alert.tags.append(watch)
-            alert.attributes['acked-by'] = g.login
-        if action == 'unack':
-            alert.attributes['acked-by'] = None
-        return alert
 
     def post_action(self, alert, action, text, **kwargs):
         if action == 'inc' and g.login:
@@ -72,7 +70,8 @@ class AckedBy(PluginBase):
                     alert.attributes['jira_url'] = ticket['url']
                     alert.attributes['jira_key'] = ticket['key']
                     alert.attributes['jira_status'] = ticket['status']
-
+                else:
+                    logging.error(f"Jira ticket from alert_id: {alert.id} was not created")
             return alert
 
     def delete(self, alert, **kwargs) -> bool:

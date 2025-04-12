@@ -6,7 +6,7 @@ import time
 # для локальной разработки используется
 ALERTA_API_URL = 'http://localhost:8080/alert'
 # ключ, который нужно сгенерировать командой alerta key
-API_KEY = 'GAEIHRdty0jrIf5UKzwcogICOGJLy_ES_cVgQIuZ_'
+API_KEY = 'GAEIHRdty0jrIf5UKzwcogICOGJLy_ES_cVgQIuZ'
 
 info = """
 This script is used to send alerts to Alerta, either one at a time using command-line
