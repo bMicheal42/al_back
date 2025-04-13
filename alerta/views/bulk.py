@@ -1,6 +1,6 @@
 import logging
 
-from flask import g, jsonify, request
+from flask import g, jsonify, request, current_app
 from flask_cors import cross_origin
 
 from alerta.app import qb
@@ -69,13 +69,17 @@ def bulk_set_status():
         return jsonify(status='ok', updated=updated, count=len(updated))
 
 
+SUPPORTED_ACTIONS = ['ack', 'false-positive', 'inc', 'esc', 'aidone']
+BULK_ACTIONS = ['ack', 'false-positive']
+
+
 @api.route('/_bulk/alerts/action', methods=['OPTIONS', 'PUT'])
 @cross_origin()
 @permission(Scope.write_alerts)
 @timer(status_timer)
 @jsonp
 def bulk_action_alert():
-    from alerta.tasks import action_alerts, mass_action
+    from alerta.tasks import action_alerts, mass_action, single_action
 
     action = request.json.get('action', None)
     text = request.json.get('text', 'bulk status update')
@@ -87,21 +91,54 @@ def bulk_action_alert():
         raise ApiError("must supply 'alert_ids' as json list", 400)
     if not all(isinstance(alert_id, str) for alert_id in alerts):
         raise ApiError("all alert_ids must be strings", 400)
-
     if not action:
         raise ApiError("must supply 'action' as json data", 400)
-
     if not alerts:
         raise ApiError('not found', 404)
+    if action not in SUPPORTED_ACTIONS:
+        raise ApiError(f"Unsupported action '{action}'. Supported actions are: {', '.join(SUPPORTED_ACTIONS)}")
 
-    # Для действий 'ack' и 'false-positive' используем оптимизированный массовый подход
-    if action in ['ack', 'false-positive']:
-        mass_action(alerts, action, text, timeout, g.login)
-        return jsonify(status='ok', message=f'{len(alerts)} alerts processed with bulk {action}'), 200
+
+    # Для массовых действий (ack, false-positive) используем оптимизированный подход
+    if action in BULK_ACTIONS and len(alerts) > 1:
+        try:
+            mass_action(alerts, action, text, timeout, g.login)
+            return jsonify(status='ok', message=f'{len(alerts)} alerts processed with bulk {action}'), 200
+        except Exception as e:
+            logging.error(f"Mass action '{action}' failed: {str(e)}. Falling back to individual processing.")
+            # Не делаем return здесь, продолжаем обработку индивидуально
+
+    # Для одиночного действия используем оптимизированную функцию
+    elif len(alerts) == 1:
+        alert_id = alerts[0]
+        try:
+            processed_alert_id = single_action(alert_id, action, text, timeout, g.login)
+            if processed_alert_id:
+                return jsonify(status='ok', message=f'Alert processed with {action} action'), 200
+            else:
+                raise ApiError(f"Failed to process alert {alert_id} with action '{action}'", 500)
+        except Exception as e:
+            logging.error(f"Error processing alert {alert_id} with action '{action}': {str(e)}", exc_info=True)
+            raise ApiError(str(e), 500)
     
-    # Для всех остальных действий (включая 'inc') также используем синхронный вызов
-    action_alerts(alerts, action, text, timeout, g.login)
-    return jsonify(status='ok', message=f'{len(alerts)} alerts processed with {action}'), 200
+    # Для других комбинаций (новые типы действий или специальные случаи) используем общую логику
+    # Проверка, настроен ли Celery для использования
+    use_celery = current_app.config.get('CELERY_BROKER_URL', False) and len(alerts) > 1
+    
+    if use_celery:
+        try:
+            # Асинхронный вызов через Celery
+            task = action_alerts.delay(alerts, action, text, timeout, g.login)
+            return jsonify(status='ok', message=f'{len(alerts)} alerts queued for action'), 202, {
+                'Location': absolute_url('/_bulk/task/' + task.id)
+            }
+        except Exception as e:
+            # Логируем ошибку, но продолжаем синхронное выполнение
+            current_app.logger.warning(f"Could not execute asynchronously, falling back to sync mode: {str(e)}")
+    
+    # Синхронное выполнение (fallback или для одиночных алертов)
+    updated = action_alerts(alerts, action, text, timeout, g.login)
+    return jsonify(status='ok', message=f'{len(updated)} alerts processed with {action}'), 200
 
 
 @api.route('/_bulk/alerts/tag', methods=['OPTIONS', 'PUT'])

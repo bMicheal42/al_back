@@ -34,15 +34,13 @@ class JiraClient:
             self.jira = None  # Prevent connection attempts
             return None
 
-        LOG.info(f"_connect to JIRA_URL {JIRA_URL} via JIRA_USER: {JIRA_USER}")
+        LOG.warning(f"_connect to JIRA_URL {JIRA_URL} via JIRA_USER: {JIRA_USER}")
         return JIRA(
             options={'server': JIRA_URL, 'timeout': '4', 'max_retries': '4', 'verify': True},
             basic_auth=(JIRA_USER, JIRA_PWD)
         )
 
     def create_ticket(self, args: Dict[str, str], infosystem: str = None, projectgroup: str = None):
-        """Creates a JIRA ticket based on the given parameters."""
-
         JIRA_PROJECTGROUPS = app.config['JIRA_PROJECTGROUPS']
         JIRA_OWNERS_GROUPS = app.config['JIRA_OWNERS_GROUPS']
         JIRA_SEVERITY_LEVEL = app.config['JIRA_SEVERITY_LEVEL']
@@ -75,6 +73,7 @@ class JiraClient:
             escalation_group2 = JIRA_OWNERS_GROUPS.get(owner_2, None)
 
             username = args.get('username', 'g.taftin') # в идеале проверять что логин есть в Jira (дорого по времени)
+            logging.warning(f"CHECK args: {args}")
 
             ticket = self.jira.create_issue(
                 project=JIRA_PROJECT,
@@ -93,6 +92,7 @@ class JiraClient:
                 customfield_19918=escalation_group1,                      # Escalation Group № 161 чекает
                 customfield_19919=escalation_group2,                      # Reserve Escalation Group
             )
+
             ticket_fields = {
                 "url": ticket.permalink(),
                 "key": ticket.key,
@@ -109,7 +109,6 @@ class JiraClient:
                     error_text = e.response.text
                 except Exception as parse_err:
                     error_text = f'Не удалось получить тело ответа: {parse_err}'
-
             LOG.error(f"Error creating JIRA ticket: {e.status_code} - {e.text if hasattr(e, 'text') else ''}")
             LOG.error(f"Response content: {error_text}")
             return None

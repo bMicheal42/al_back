@@ -33,28 +33,6 @@ def assign_customer(wanted: str = None, permission: str = Scope.admin_alerts) ->
 
 def process_alert(alert: Alert) -> Alert:
     logging.debug('Processing alert: %s', alert)
-    wanted_plugins, wanted_config = plugins.routing(alert)
-
-    skip_plugins = False
-    for plugin in wanted_plugins:
-        if alert.is_suppressed:
-            skip_plugins = True
-            break
-        try:
-            alert = plugin.pre_receive(alert, config=wanted_config)
-        except TypeError:
-            alert = plugin.pre_receive(alert)  # for backward compatibility
-        except (RejectException, HeartbeatReceived, BlackoutPeriod, RateLimit, ForwardingLoop, AlertaException):
-            raise
-        except Exception as e:
-            if current_app.config['PLUGINS_RAISE_ON_ERROR']:
-                raise RuntimeError(f"Error while running pre-receive plugin '{plugin.name}': {str(e)}")
-            else:
-                logging.error(f"Error while running pre-receive plugin '{plugin.name}': {str(e)}")
-        if not alert:
-            raise SyntaxError(f"Plugin '{plugin.name}' pre-receive hook did not return modified alert")
-
-
     try:
         is_new_alert = True
         if alert.origin and alert.origin.startswith("zabbix/"):
@@ -80,8 +58,6 @@ def process_alert(alert: Alert) -> Alert:
                     # print(f"Match found for pattern '{pattern['name']}' with alert {alert.id}")
 
                     incident = matches[0]  # picking first match as incident
-
-                    # print(f"~~~ '{type(incident)}'")
 
                     time_window = current_app.config['PATTERN_GROUPING_TIME_WINDOW']
 
@@ -117,16 +93,12 @@ def process_alert(alert: Alert) -> Alert:
                             continue
 
                     incident = incident.deduplicate(alert)
-                    # update alert info
-                    # print(f"Pattern~1: {type(alert.attributes)} - TYPE")
                     alert.attributes['incident'] = False
                     alert.attributes['pattern_name'] = pattern['name']
                     alert.attributes['pattern_id'] = pattern['id']
                     alert.attributes['wasIncident'] = False
                     alert.attributes = alert.update_attributes(alert.attributes)
 
-                    # update incident info
-                    # print(f"Pattern~2: {type(incident.attributes)} - TYPE")
                     if incident.status == 'closed' or incident.status == 'expired':
                         previous_status = incident.get_previous_status()
                         if previous_status and alert.status != 'closed':
@@ -137,7 +109,6 @@ def process_alert(alert: Alert) -> Alert:
                     incident.attributes['patterns'].append(pattern['name'])
                     incident.update_attributes(incident.attributes)
 
-                    # adding history record
                     try:
                         db.add_pattern_history(
                             pattern_name=pattern['name'],
@@ -157,32 +128,6 @@ def process_alert(alert: Alert) -> Alert:
 
     except Exception as e:
         raise ApiError(str(e))
-
-    wanted_plugins, wanted_config = plugins.routing(alert)
-
-    alert_was_updated: bool = False
-    for plugin in wanted_plugins:
-        if skip_plugins:
-            break
-        try:
-            updated = plugin.post_receive(alert, config=wanted_config)
-        except TypeError:
-            updated = plugin.post_receive(alert)  # for backward compatibility
-        except AlertaException:
-            raise
-        except Exception as e:
-            if current_app.config['PLUGINS_RAISE_ON_ERROR']:
-                raise ApiError(f"Error while running post-receive plugin '{plugin.name}': {str(e)}")
-            else:
-                logging.error(f"Error while running post-receive plugin '{plugin.name}': {str(e)}")
-        if updated:
-            alert = updated
-            alert_was_updated = True
-
-    if alert_was_updated:
-        alert.update_tags(alert.tags)
-        alert.attributes = alert.update_attributes(alert.attributes)
-
     return alert
 
 
