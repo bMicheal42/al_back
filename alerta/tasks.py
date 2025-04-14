@@ -17,66 +17,64 @@ from alerta.app import alarm_model
 celery = create_celery_app()
 
 # Определяем поддерживаемые действия
-SUPPORTED_ACTIONS = ['ack', 'false-positive', 'inc', 'esc', 'aidone']
+SUPPORTED_ACTIONS = ['ack', 'false-positive', 'inc', 'esc', 'aidone', 'close']
 BULK_ACTIONS = ['ack', 'false-positive']
 
-@celery.task
-def action_alerts(alerts: List[str], action: str, text: str, timeout: Optional[int], login: str) -> None:
-    updated = []
-    logging.info(f"Starting processing {len(alerts)} alerts with action '{action}'")
-
-    # Проверяем, поддерживается ли действие
-    if action not in SUPPORTED_ACTIONS:
-        logging.error(f"Unsupported action '{action}'. Supported actions are: {', '.join(SUPPORTED_ACTIONS)}")
-        raise InvalidAction(f"Unsupported action '{action}'. Supported actions are: {', '.join(SUPPORTED_ACTIONS)}")
-
-    try:
-        if not hasattr(g, 'login') or not g.login:
-            g.login = login
-    except:
-        pass  # Игнорируем ошибки - в контексте Celery g может быть недоступным
-
-    # Проверка для инцидентов - всегда должен быть только один алерт
-    if action == 'inc' and len(alerts) > 1:
-        logging.error(f"Action 'inc' cannot be applied to multiple alerts ({len(alerts)} selected)")
-        return
-
-    # Проверяем, является ли действие массовым и поддерживаемым для оптимизированной обработки
-    if action in BULK_ACTIONS and len(alerts) > 1:
-        try:
-            mass_action(alerts, action, text, timeout, login)
-            logging.info(f"Mass action '{action}' completed successfully for {len(alerts)} alerts")
-            return
-        except Exception as e:
-            logging.error(f"Mass action '{action}' failed: {str(e)}. Falling back to individual processing.")
-
-    # Одиночное действие
-    elif len(alerts) == 1:
-        alert_id = alerts[0]
-        processed_alert_id = single_action(alert_id, action, text, timeout, login)
-        if processed_alert_id:
-            updated.append(processed_alert_id)
-    else:
-        # Обработка пустого списка alerts
-        logging.error(f"No valid alerts to process for action '{action}'")
-
-    if updated:
-        logging.info(f"Successfully processed {len(updated)} alerts with action '{action}'")
-    
-    return updated
+# @celery.task
+# def action_alerts(alerts: List[str], action: str, text: str, timeout: Optional[int], login: str) -> None:
+#     updated = []
+#     errors = []
+#     for alert_id in alerts:
+#         alert = Alert.find_by_id(alert_id)
+#
+#         try:
+#             g.login = login
+#             previous_status = alert.status
+#             # pre action
+#             # alert, action, text, timeout, was_updated = process_action(alert, action, text, timeout)
+#             # update status
+#             # alert = alert.from_action(action, text, timeout) # хуйня по сути тот же апдейт всего но через валидацию и плагины опять
+#             # if was_updated:
+#             alert = alert.recalculate_incident_close()
+#             alert.recalculate_status_durations()
+#             alert.update_attributes(alert.attributes)
+#             # post action
+#             # alert, action, text, timeout, was_updated = process_action(alert, action, text, timeout, post_action=True)
+#         except RejectException as e:
+#             errors.append(str(e))
+#             continue
+#         except InvalidAction as e:
+#             errors.append(str(e))
+#             continue
+#         except Exception as e:
+#             errors.append(str(e))
+#             continue
+#
+#         # if previous_status != alert.status:
+#         #     try:
+#         #         alert, status, text = process_status(alert, alert.status, text)
+#         #         alert = alert.from_status(status, text, timeout)
+#         #     except RejectException as e:
+#         #         errors.append(str(e))
+#         #         continue
+#         #     except Exception as e:
+#         #         errors.append(str(e))
+#         #         continue
+#
+#         updated.append(alert.id)
 
 
 def single_action(alert_id: str, action: str, text: str, timeout: Optional[int], login: str) -> Optional[str]:
     """
     Обрабатывает одиночный алерт для действий ack, false-positive, inc, esc, aidone.
-    
+
     Args:
         alert_id: ID алерта
         action: Действие для выполнения
         text: Текст комментария
         timeout: Таймаут действия
         login: Логин пользователя
-        
+
     Returns:
         ID обработанного алерта или None в случае ошибки
     """
@@ -88,12 +86,13 @@ def single_action(alert_id: str, action: str, text: str, timeout: Optional[int],
 
         current_login = getattr(g, 'login', login)
         previous_status = alert.status
-        
-        logging.debug(f"Processing single action '{action}' for alert ID {alert_id} (status: {previous_status})")
-        
+
+        logging.warning(f"Processing single action '{action}' for alert ID {alert_id} (status: {previous_status})")
+
         # Получаем текущий и предыдущий статусы для transition
         current_status, _, previous_status, _ = alert._get_hist_info(action)
-        
+        logging.warning(f"current_status: {current_status}, previous_status: {previous_status}")
+
         # Применяем transition для определения нового статуса
         _, new_status = alarm_model.transition(
             alert=alert,
@@ -101,25 +100,38 @@ def single_action(alert_id: str, action: str, text: str, timeout: Optional[int],
             previous_status=previous_status,
             action=action
         )
-        
+        logging.warning(f"new_status: {new_status}")
         # Обновляем статус и добавляем специфичные атрибуты
         # Всегда считаем, что обновление требуется
         alert.status = new_status
-        
         # Добавляем специальные атрибуты в зависимости от действия
         if action == 'ack':
             alert.attributes['acked-by'] = current_login
+
         elif action == 'inc':
             alert.attributes['incident'] = True
             # Обновляем статус алерта сразу
             update_time = datetime.utcnow()
             db.set_status(alert.id, new_status, timeout, update_time=update_time)
+            history = History(
+                id=alert.id,
+                event=alert.event,
+                severity=alert.severity,
+                status=new_status,
+                value=alert.value,
+                text=text or f'Action: {action}',
+                change_type=ChangeType.action,
+                update_time=update_time,
+                user=current_login,
+                timeout=timeout
+            )
+            Alert.add_history(alert.id, history)
             # Запускаем создание Jira тикета в отдельном потоке и ждем результат
             result = {'ticket': None}
             def create_ticket_wrapper(alert, login, result):
                 ticket_data = create_jira_ticket(alert, login)
                 result['ticket'] = ticket_data
-            
+
             thread = threading.Thread(target=create_ticket_wrapper, args=(alert, current_login, result))
             thread.start()
             thread.join()  # Ждем завершения потока
@@ -132,7 +144,7 @@ def single_action(alert_id: str, action: str, text: str, timeout: Optional[int],
                 logging.info(f"Created Jira ticket {ticket['key']} for alert {alert.id}")
             else:
                 logging.error(f"Failed to create Jira ticket for alert {alert.id}")
-        # elif action == 'esc':
+
             # Возможные атрибуты для эскалации
             # alert.attributes['escalated'] = True
             # alert.attributes['escalated-by'] = current_login
@@ -142,47 +154,44 @@ def single_action(alert_id: str, action: str, text: str, timeout: Optional[int],
             # alert.attributes['aidone'] = True
             # alert.attributes['aidone-by'] = current_login
             # alert.attributes['aidone-time'] = datetime.utcnow().isoformat()
-        
-        # Время для обновления и истории
-        update_time = datetime.utcnow()
-        
+
+
         # Сохраняем изменения в БД
         if action != 'inc':
+            update_time = datetime.utcnow()
             db.set_status(alert.id, new_status, timeout, update_time=update_time)
             alert.update_attributes(alert.attributes)
-    
-        # Добавляем запись в историю
-        history = History(
-            id=alert.id,
-            event=alert.event,
-            severity=alert.severity,
-            status=new_status,
-            value=alert.value,
-            text=text or f'Action: {action}',
-            change_type=ChangeType.action,
-            update_time=update_time,
-            user=current_login,
-            timeout=timeout
-        )
-        Alert.add_history(alert.id, history)
-        
+            history = History(
+                id=alert.id,
+                event=alert.event,
+                severity=alert.severity,
+                status=new_status,
+                value=alert.value,
+                text=text or f'Action: {action}',
+                change_type=ChangeType.action,
+                update_time=update_time,
+                user=current_login,
+                timeout=timeout
+            )
+            Alert.add_history(alert.id, history)
+
         logging.debug(f"Successfully processed alert {alert_id} with single action '{action}', new status: {new_status}")
         return alert.id
-        
+
     except (RejectException, InvalidAction) as e:
         logging.error(f"Action '{action}' failed for alert {alert_id}: {str(e)}")
     except Exception as e:
         logging.error(f"Unexpected error for alert {alert_id}, action '{action}': {str(e)}", exc_info=True)
-    
+
     return None
 
 
 def mass_action(alerts: List[str], action: str, text: str, timeout: Optional[int], login: str) -> None:
     if not alerts:
         return
-    
+
     now = datetime.utcnow()
-    
+
     try:
         if not hasattr(g, 'login') or not g.login:
             g.login = login
@@ -201,15 +210,15 @@ def mass_action(alerts: List[str], action: str, text: str, timeout: Optional[int
     alert_objects = Alert.find_by_ids(alerts)
     attribute_updates = {}
     alert_ids = []
-    
+
     for alert in alert_objects:
         alert_ids.append(alert.id)
         if action == 'ack':
             alert.attributes['acked-by'] = login
         attribute_updates[alert.id] = alert.attributes.copy()
-    
+
     Alert.mass_update_status(alerts, new_status, timeout, now)
-    
+
     for alert_id in alert_ids:
         history = History(
             id=alert_id,
@@ -224,7 +233,7 @@ def mass_action(alerts: List[str], action: str, text: str, timeout: Optional[int
             timeout=timeout
         )
         Alert.add_history(alert_id, history)
-    
+
     Alert.mass_update_attributes(attribute_updates)
     logging.info(f"Mass {action} action applied to {len(alerts)} alerts")
 
@@ -234,7 +243,7 @@ def create_jira_ticket(alert, login):
     if alert.attributes.get('jira_key'):
         logging.info(f"Jira ticket already exists for alert {alert.id}: {alert.attributes.get('jira_key')}")
         return None
-    
+
     try:
         params = {
             'attributes': alert.attributes,
@@ -273,7 +282,7 @@ def mass_add_history_bulk(self, alert_ids, change_type, status, text, update_tim
 
     if not alert_ids:
         return True
-        
+
     try:
         # PostgreSQL вариант
         placeholders = ','.join(['%s'] * len(alert_ids))

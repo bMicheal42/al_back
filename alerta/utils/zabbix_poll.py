@@ -154,21 +154,21 @@ def poll_zabbix_events(event_ids):
 
                 if trigger_status == 1:
                     updated_event_ids.append(event_id)
-                    logger.warning(f"Event {event_id} - trigger is DISABLED")
+                    logger.debug(f"Event {event_id} - trigger is DISABLED")
                 elif not has_hosts:
                     updated_event_ids.append(event_id)
-                    logger.warning(f"Event {event_id} - host was DELETED")
+                    logger.debug(f"Event {event_id} - host was DELETED")
                 elif r_eventid != '0':
                     # updated_event_ids.append(event_id) //TODO пока выключим, так как тяжеоло аффектит МАСТЕР АЛЕРТЫ
-                    logger.warning(f"Event {event_id} - is in OK state")
+                    logger.debug(f"Event {event_id} - is in OK state")
                 else:
-                    logger.warning(f"Event {event_id} - remains in ERROR state")
+                    logger.debug(f"Event {event_id} - remains in ERROR state")
             else:
                 # Event not found in Zabbix - mark for closing
                 updated_event_ids.append(event_id)
-                logger.warning(f"Event {event_id} not found in Zabbix")
+                logger.debug(f"Event {event_id} not found in Zabbix")
 
-        logger.warning(f"Found {len(updated_event_ids)} events to close")
+        logger.debug(f"Found {len(updated_event_ids)} events to close")
         return updated_event_ids
 
     except Exception as e:
@@ -190,7 +190,7 @@ def get_error_alerts_older_than(minutes=5):
             group=[]
         )
         alerts = Alert.find_all_really(query=query)
-        logger.warning(f"Found {len(alerts)} open alerts older than {minutes} minutes")
+        logger.debug(f"Found {len(alerts)} open alerts older than {minutes} minutes")
         return alerts
 
     except Exception as e:
@@ -209,7 +209,7 @@ def check_alerts_for_close(app):
     with app.app_context():
         alerts = get_error_alerts_older_than()
         if not alerts:
-            logger.warning("No open alerts to process")
+            logger.debug("No open alerts to process")
             return
 
         event_map = {}
@@ -221,12 +221,12 @@ def check_alerts_for_close(app):
             event_map.setdefault(event_id, []).append(alert)
 
         if not event_map:
-            logger.warning("No alerts with Zabbix event IDs found")
+            logger.debug("No alerts with Zabbix event IDs found")
             return
 
         event_ids_to_close = poll_zabbix_events(list(event_map.keys()))
         if not event_ids_to_close:
-            logger.warning("No Zabbix events to close")
+            logger.debug("No Zabbix events to close")
             return
 
         event_ids_tuple = tuple(str(eid) for eid in event_ids_to_close)
@@ -241,18 +241,18 @@ def check_alerts_for_close(app):
 
         filtered_alerts = Alert.find_all_really(query_filtered_alerts)  # Find alerts to close
         if not filtered_alerts:
-            logger.warning("No matching alerts to close")
+            logger.debug("No matching alerts to close")
             return
-        logger.warning(f"Found {len(filtered_alerts)} alerts to close")
+        logger.debug(f"Found {len(filtered_alerts)} alerts to close")
 
         g.login = "admin" # Set user for audit trail
 
         try:
             success_count, error_count = set_alerts_status(filtered_alerts)
             if success_count > 0:
-                logger.warning(f"Successfully closed {success_count} alerts from Zabbix events")
+                logger.debug(f"Successfully closed {success_count} alerts from Zabbix events")
             if error_count > 0:
-                logger.warning(f"Failed to close {error_count} alerts")
+                logger.debug(f"Failed to close {error_count} alerts")
 
         except Exception as exc:
             logger.exception(f"Unexpected error when closing alerts: {exc}")
@@ -273,7 +273,7 @@ scheduler = None
 def init_zabbix_poll(app):
     global scheduler
     if scheduler and scheduler.running:
-        logger.warning("Zabbix scheduler already running - skipping initialization")
+        logger.info("Zabbix scheduler already running - skipping initialization")
         return
 
     try:

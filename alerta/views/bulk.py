@@ -69,7 +69,7 @@ def bulk_set_status():
         return jsonify(status='ok', updated=updated, count=len(updated))
 
 
-SUPPORTED_ACTIONS = ['ack', 'false-positive', 'inc', 'esc', 'aidone']
+SUPPORTED_ACTIONS = ['ack', 'false-positive', 'inc', 'esc', 'aidone', 'close']
 BULK_ACTIONS = ['ack', 'false-positive']
 
 
@@ -79,7 +79,7 @@ BULK_ACTIONS = ['ack', 'false-positive']
 @timer(status_timer)
 @jsonp
 def bulk_action_alert():
-    from alerta.tasks import action_alerts, mass_action, single_action
+    from alerta.tasks import mass_action, single_action
 
     action = request.json.get('action', None)
     text = request.json.get('text', 'bulk status update')
@@ -106,8 +106,6 @@ def bulk_action_alert():
             return jsonify(status='ok', message=f'{len(alerts)} alerts processed with bulk {action}'), 200
         except Exception as e:
             logging.error(f"Mass action '{action}' failed: {str(e)}. Falling back to individual processing.")
-            # Не делаем return здесь, продолжаем обработку индивидуально
-
     # Для одиночного действия используем оптимизированную функцию
     elif len(alerts) == 1:
         alert_id = alerts[0]
@@ -120,25 +118,10 @@ def bulk_action_alert():
         except Exception as e:
             logging.error(f"Error processing alert {alert_id} with action '{action}': {str(e)}", exc_info=True)
             raise ApiError(str(e), 500)
-    
-    # Для других комбинаций (новые типы действий или специальные случаи) используем общую логику
-    # Проверка, настроен ли Celery для использования
-    use_celery = current_app.config.get('CELERY_BROKER_URL', False) and len(alerts) > 1
-    
-    if use_celery:
-        try:
-            # Асинхронный вызов через Celery
-            task = action_alerts.delay(alerts, action, text, timeout, g.login)
-            return jsonify(status='ok', message=f'{len(alerts)} alerts queued for action'), 202, {
-                'Location': absolute_url('/_bulk/task/' + task.id)
-            }
-        except Exception as e:
-            # Логируем ошибку, но продолжаем синхронное выполнение
-            current_app.logger.warning(f"Could not execute asynchronously, falling back to sync mode: {str(e)}")
-    
-    # Синхронное выполнение (fallback или для одиночных алертов)
-    updated = action_alerts(alerts, action, text, timeout, g.login)
-    return jsonify(status='ok', message=f'{len(updated)} alerts processed with {action}'), 200
+    # не нашли
+    else:
+        raise ApiError(f"No action found for alerts {alerts} with action '{action}'", 500)
+    return jsonify(status='ok', message=f'{len(alerts)} alerts processed with {action}'), 200
 
 
 @api.route('/_bulk/alerts/tag', methods=['OPTIONS', 'PUT'])
