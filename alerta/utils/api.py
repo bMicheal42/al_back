@@ -46,7 +46,7 @@ def process_alert(alert: Alert) -> Alert:
 
         cache = PatternCache()
         patterns = cache.get_patterns()
-        logging.debug(f"Loaded patterns from cache: {patterns}")
+        logging.warning(f"Loaded patterns from cache: {patterns}")
         
         # Флаг для отслеживания, найден ли соответствующий паттерн
         pattern_matched = False
@@ -58,7 +58,7 @@ def process_alert(alert: Alert) -> Alert:
                 # check if pattern matches alert
                 matches = alert.pattern_match_duplicated(pattern_query=pattern['sql_rule'])
                 if matches:
-                    logging.debug(f"Match found for pattern '{pattern['name']}' with alert {alert.id}")
+                    logging.warning(f"Match found for pattern '{pattern['name']}' with alert {alert.id}")
                     # print(f"Match found for pattern '{pattern['name']}' with alert {alert.id}")
 
                     incident = matches[0]  # picking first match as incident
@@ -77,7 +77,7 @@ def process_alert(alert: Alert) -> Alert:
                         first_pattern = incident.attributes['patterns'][0]
                         first_pattern_priority = cache.get_pattern_priority_by_name(first_pattern)
                         if pattern['priority'] > first_pattern_priority:
-                            logging.debug(f"Alert pattern priority is lower than incident pattern priority")
+                            logging.warning(f"Alert pattern priority is lower than incident pattern priority")
                             # print(f"Alert pattern priority is lower than incident pattern priority")
                             continue
 
@@ -87,12 +87,12 @@ def process_alert(alert: Alert) -> Alert:
                         for child in childs:
                             child_pattern_id = child.attributes.get('pattern_id')
                             if child_pattern_id is None or child_pattern_id != pattern['id']:
-                                logging.debug(f"Pattern: {pattern['name']} - {child.id} is not a duplicate of incident {incident.id}")
+                                logging.warning(f"Pattern: {pattern['name']} - {child.id} is not a duplicate of incident {incident.id}")
                                 # print(f"Pattern: {pattern['name']} - {child.id} is not a duplicate of incident {incident.id}")
                                 skip = True
                                 break
                         if skip:
-                            logging.debug(f"Pattern: {pattern['name']} - SKIP")
+                            logging.warning(f"Pattern: {pattern['name']} - SKIP")
                             # print(f"Pattern: {pattern['name']} - SKIP")
                             continue
 

@@ -1025,7 +1025,10 @@ class Alert:
 
     # link alert to issue
     def link_to_issue(self, issue_id: str) -> 'Alert':
+        logging.warning(f"Привязка алерта {self.id} к issue {issue_id}")
+        
         if self.issue_id == issue_id:
+            logging.warning(f"Алерт {self.id} уже привязан к issue {issue_id}")
             return self
             
         history = History(
@@ -1043,7 +1046,15 @@ class Alert:
         self.history.append(history)
         self.issue_id = issue_id
         
-        return Alert.from_db(db.update_alert_issue_id(self.id, issue_id, history))
+        try:
+            result = Alert.from_db(db.update_alert_issue_id(self.id, issue_id, history))
+            logging.warning(f"Результат привязки алерта {self.id} к issue {issue_id}: issue_id={result.issue_id if result else None}")
+            return result
+        except Exception as e:
+            logging.error(f"Ошибка привязки алерта {self.id} к issue {issue_id}: {str(e)}")
+            import traceback
+            logging.error(traceback.format_exc())
+            raise
         
     # unlink alert from issue
     def unlink_from_issue(self) -> 'Alert':

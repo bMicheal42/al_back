@@ -2425,6 +2425,10 @@ class Backend(Database):
         return bool(self._delete(delete, (issue_id,)))
 
     def update_alert_issue_id(self, alert_id, issue_id, history=None):
+        import logging
+        
+        logging.warning(f"Обновление issue_id для алерта {alert_id} на {issue_id}")
+        
         update = """
             UPDATE alerts
             SET issue_id = %s
