@@ -9,6 +9,7 @@ from alerta.exceptions import (AlertaException, ApiError, BlackoutPeriod,
                                ForwardingLoop, HeartbeatReceived,
                                InvalidAction, RateLimit, RejectException)
 from alerta.models.alert import Alert
+from alerta.models.issue import Issue
 from alerta.models.enums import Scope
 from alerta.utils.pattern_cache import PatternCache
 from alerta.utils.format import CustomJSONEncoder
@@ -46,6 +47,9 @@ def process_alert(alert: Alert) -> Alert:
         cache = PatternCache()
         patterns = cache.get_patterns()
         logging.debug(f"Loaded patterns from cache: {patterns}")
+        
+        # Флаг для отслеживания, найден ли соответствующий паттерн
+        pattern_matched = False
 
         for pattern in patterns:
             if not pattern['is_active']:
@@ -121,10 +125,62 @@ def process_alert(alert: Alert) -> Alert:
                     logging.debug(f"History record added. Pattern: {pattern['name']}, Incident: {incident.id}, Alert: {alert.id}")
                     # print(f"History record added. Pattern: {pattern['name']}, Incident: {incident.id}, Alert: {alert.id}")
 
+                    # Отмечаем, что паттерн был найден
+                    pattern_matched = True
+                    
                     # stop processing patterns
                     break
             except Exception as e:
                 logging.error(f"Error while matching pattern '{pattern['name']}': {str(e)}")
+        
+        # Если ни один паттерн не подошел и это новый алерт, создаем новый Issue
+        if not pattern_matched and is_new_alert and alert.attributes.get('incident', True):
+            try:
+                # Создаем новый Issue на основе данных из Alert
+                logging.debug(f"No pattern matched for alert {alert.id}, creating new Issue")
+                
+                # Подготовка необходимых данных для Issue
+                summary = f"Issue for {alert.event} on {alert.resource}"
+                severity = alert.severity
+                description = alert.text
+                
+                # Извлекаем дополнительную информацию из тегов
+                project_groups = []
+                info_systems = []
+                hosts = [alert.resource]
+                
+                for tag in alert.tags:
+                    if tag.startswith('ProjectGroup:'):
+                        project_groups.append(tag.split(':', 1)[1])
+                    elif tag.startswith('InfoSystem:'):
+                        info_systems.append(tag.split(':', 1)[1])
+                
+                # Создаем Issue
+                issue = Issue(
+                    summary=summary,
+                    severity=severity,
+                    description=description,
+                    status='open',
+                    alerts=[alert.id],
+                    hosts=hosts,
+                    project_groups=project_groups,
+                    info_systems=info_systems,
+                    attributes={}
+                )
+                
+                issue = issue.create()
+                logging.debug(f"Created new Issue {issue.id} for alert {alert.id}")
+                
+                # Связываем Alert с Issue
+                alert = alert.link_to_issue(issue.id)
+                logging.debug(f"Linked alert {alert.id} to issue {issue.id}")
+                
+                # Обновляем атрибуты алерта
+                alert.attributes['wasIncident'] = False
+                alert.attributes = alert.update_attributes(alert.attributes)
+                
+            except Exception as e:
+                logging.error(f"Error creating Issue for alert {alert.id}: {str(e)}")
 
     except Exception as e:
         raise ApiError(str(e))

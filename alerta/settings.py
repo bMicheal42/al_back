@@ -142,7 +142,7 @@ CELERY_TASK_SERIALIZER = 'customjson'
 CELERY_RESULT_SERIALIZER = 'customjson'
 
 # Authentication settings
-AUTH_REQUIRED = True
+AUTH_REQUIRED = False
 AUTH_PROVIDER = 'basic'  # basic (default), ldap, github, openid, saml2, azure, cognito, gitlab, google, keycloak
 ADMIN_USERS = []  # type: List[str]
 DEFAULT_ADMIN_ROLE = 'admin'
@@ -153,7 +153,7 @@ USER_DEFAULT_SCOPES = ['read', 'write']  # Note: 'write' scope implicitly includ
 DEFAULT_GUEST_ROLE = 'guest'
 GUEST_ROLES = [DEFAULT_GUEST_ROLE]
 GUEST_DEFAULT_SCOPES = ['read:alerts']
-CUSTOM_SCOPES = []  # type: List[str]
+CUSTOM_SCOPES = ['read:issues', 'write:issues']  # type: List[str]
 # Set DELETE_SCOPES to "delete:alerts" to prevent users with "write:alerts" scope being able to delete alerts
 DELETE_SCOPES = []  # type: List[str]
 CUSTOMER_VIEWS = False

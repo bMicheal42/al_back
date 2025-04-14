@@ -520,6 +520,26 @@ class Database(Base):
     def get_unack(self):
         raise NotImplementedError
 
+    # ISSUES
+
+    def create_issue(self, issue):
+        raise NotImplementedError
+
+    def get_issue(self, issue_id, customers=None):
+        raise NotImplementedError
+
+    def get_issues(self, query=None, page=None, page_size=None):
+        raise NotImplementedError
+
+    def update_issue(self, issue_id, update, update_time=None, history=None):
+        raise NotImplementedError
+
+    def delete_issue(self, issue_id):
+        raise NotImplementedError
+
+    def update_alert_issue_id(self, alert_id, issue_id, history=None):
+        raise NotImplementedError
+
 
 class QueryBuilder(Base):
 

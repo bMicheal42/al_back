@@ -98,6 +98,9 @@ class Scope(str):
     read_management = 'read:management'
     admin_management = 'admin:management'
     read_userinfo = 'read:userinfo'
+    read_issues = 'read:issues'
+    write_issues = 'write:issues'
+    admin_issues = 'admin:issues'
 
     @staticmethod
     def init_app(app):
@@ -190,3 +193,4 @@ class NoteType(StrEnum):
     key = 'api-key'
     perm = 'permission'
     user = 'user'
+    issue = 'issue'

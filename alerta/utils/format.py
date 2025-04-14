@@ -24,6 +24,21 @@ class AlertaJsonProvider(JSONProvider):
         return json.loads(s, **kwargs)
 
 
+def deep_serialize_datetime(obj):
+    """
+    Рекурсивно преобразует объекты datetime в строки ISO8601 во вложенных структурах
+    """
+    if isinstance(obj, datetime.datetime):
+        return DateTime.iso8601(obj)
+    elif isinstance(obj, dict):
+        return {k: deep_serialize_datetime(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [deep_serialize_datetime(item) for item in obj]
+    elif isinstance(obj, tuple):
+        return tuple(deep_serialize_datetime(item) for item in obj)
+    return obj
+
+
 class CustomJSONEncoder(json.JSONEncoder):
     def default(self, o: Any) -> Any:  # pylint: disable=method-hidden
         from alerta.models.alert import Alert, History

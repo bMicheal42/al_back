@@ -83,6 +83,7 @@ class Alert:
         self.last_receive_time = kwargs.get('last_receive_time', None)
         self.update_time = kwargs.get('update_time', None)
         self.history = kwargs.get('history', None) or list()
+        self.issue_id = kwargs.get('issue_id', None)
 
     @classmethod
     def parse(cls, json: JSON) -> 'Alert':
@@ -157,6 +158,7 @@ class Alert:
             'lastReceiveTime': self.last_receive_time,
             'updateTime': self.update_time,
             'history': [h.serialize for h in sorted(self.history, key=lambda x: x.update_time)],
+            'issue_id': self.issue_id
         }
 
     def get_id(self, short: bool = False) -> str:
@@ -206,7 +208,8 @@ class Alert:
             last_receive_id=doc.get('lastReceiveId', None),
             last_receive_time=doc.get('lastReceiveTime', None),
             update_time=doc.get('updateTime', None),
-            history=[History.from_db(h) for h in doc.get('history', list())]
+            history=[History.from_db(h) for h in doc.get('history', list())],
+            issue_id=doc.get('issue_id', None)
         )
 
     @classmethod
@@ -239,7 +242,8 @@ class Alert:
             last_receive_id=rec.last_receive_id,
             last_receive_time=rec.last_receive_time,
             update_time=getattr(rec, 'update_time'),
-            history=[History.from_db(h) for h in rec.history]
+            history=[History.from_db(h) for h in rec.history],
+            issue_id=getattr(rec, 'issue_id', None)
         )
 
     @classmethod
@@ -1018,3 +1022,48 @@ class Alert:
             return []
             
         return db.mass_update_status(alert_ids, status, timeout, update_time)
+
+    # link alert to issue
+    def link_to_issue(self, issue_id: str) -> 'Alert':
+        if self.issue_id == issue_id:
+            return self
+            
+        history = History(
+            id=self.id,
+            event=self.event,
+            severity=self.severity,
+            status=self.status,
+            value=self.value,
+            text=f'Alert linked to issue {issue_id}',
+            change_type='link-issue',
+            update_time=datetime.utcnow(),
+            user=g.login if hasattr(g, 'login') else None
+        )
+        
+        self.history.append(history)
+        self.issue_id = issue_id
+        
+        return Alert.from_db(db.update_alert_issue_id(self.id, issue_id, history))
+        
+    # unlink alert from issue
+    def unlink_from_issue(self) -> 'Alert':
+        if not self.issue_id:
+            return self
+            
+        issue_id = self.issue_id
+        history = History(
+            id=self.id,
+            event=self.event,
+            severity=self.severity,
+            status=self.status,
+            value=self.value,
+            text=f'Alert unlinked from issue {issue_id}',
+            change_type='unlink-issue',
+            update_time=datetime.utcnow(),
+            user=g.login if hasattr(g, 'login') else None
+        )
+        
+        self.history.append(history)
+        self.issue_id = None
+        
+        return Alert.from_db(db.update_alert_issue_id(self.id, None, history))

@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import List, Dict, Any
 import json
 import re
+from copy import deepcopy
 
 import psycopg2
 from flask import current_app
@@ -35,12 +36,14 @@ class HistoryAdapter:
 
     def getquoted(self):
         def quoted(o):
+            if isinstance(o, datetime):
+                o = DateTime.iso8601(o)
             a = adapt(o)
             if hasattr(a, 'prepare'):
                 a.prepare(self.conn)
             return a.getquoted().decode('utf-8')
 
-        return '({}, {}, {}, {}, {}, {}, {}, {}::timestamp, {}, {})::history'.format(
+        history_str = '({}, {}, {}, {}, {}, {}, {}, {}::timestamp, {}, {})::history'.format(
             quoted(self.history.id),
             quoted(self.history.event),
             quoted(self.history.severity),
@@ -52,6 +55,8 @@ class HistoryAdapter:
             quoted(self.history.user),
             quoted(self.history.timeout)
         )
+        
+        return history_str
 
     def __str__(self):
         return str(self.getquoted())
@@ -126,7 +131,8 @@ class Backend(Database):
 
     @staticmethod
     def _adapt_datetime(dt):
-        return AsIs(f'{adapt(DateTime.iso8601(dt))}')
+        iso_dt = DateTime.iso8601(dt)
+        return AsIs(f'{adapt(iso_dt)}')
 
     @property
     def name(self):
@@ -2295,3 +2301,142 @@ class Backend(Database):
     def _log(self, cursor, query, vars):
         current_app.logger.debug('{stars}\n{query}\n{stars}'.format(
             stars='*' * 40, query=cursor.mogrify(query, vars).decode('utf-8')))
+
+    # ISSUES
+
+    def create_issue(self, issue):
+        from datetime import datetime
+        from alerta.utils.format import DateTime
+        
+        # Создаем копию словаря атрибутов issue
+        issue_dict = {}
+        
+        # Сериализуем все datetime объекты в строки
+        for key, value in vars(issue).items():
+            if isinstance(value, datetime):
+                issue_dict[key] = DateTime.iso8601(value)
+            else:
+                issue_dict[key] = value
+        
+        # issue_history не нуждается в преобразовании, так как HistoryAdapter
+        # уже зарегистрирован и будет вызван автоматически
+        
+        insert = """
+            INSERT INTO issues (id, summary, severity, host_critical, duty_admin, description, status, 
+                status_duration, create_time, last_alert_time, resolve_time, pattern_id, inc_key, slack_link, 
+                disaster_link, escalation_group, alerts, hosts, project_groups, info_systems, attributes, 
+                master_incident, issue_history)
+            VALUES (%(id)s, %(summary)s, %(severity)s, %(host_critical)s, %(duty_admin)s, %(description)s, 
+                %(status)s, %(status_duration)s, %(create_time)s, %(last_alert_time)s, %(resolve_time)s, 
+                %(pattern_id)s, %(inc_key)s, %(slack_link)s, %(disaster_link)s, %(escalation_group)s, 
+                %(alerts)s, %(hosts)s, %(project_groups)s, %(info_systems)s, %(attributes)s, 
+                %(master_incident)s, %(issue_history)s::history[])
+            RETURNING *
+        """
+        
+        # Используем словарь с преобразованными значениями вместо vars(issue)
+        return self._insert(insert, issue_dict)
+
+    def get_issue(self, issue_id, customers=None):
+        select = """
+            SELECT * FROM issues
+            WHERE id = %s
+        """
+        return self._fetchone(select, (issue_id,))
+
+    def get_issues(self, query=None, page=None, page_size=None):
+        query = query or Query()
+        select = """
+            SELECT * FROM issues
+            WHERE 1=1
+        """
+        if query.get('id'):
+            select += ' AND id = %(id)s'
+        if query.get('summary'):
+            select += ' AND summary ~* %(summary)s'
+        if query.get('status'):
+            select += ' AND status = ANY(%(status)s)'
+        if query.get('alert'):
+            select += ' AND %(alert)s = ANY(alerts)'
+        if query.get('from-date'):
+            select += ' AND create_time >= %(from-date)s'
+        if query.get('to-date'):
+            select += ' AND create_time <= %(to-date)s'
+
+        select += ' ORDER BY create_time DESC'
+        
+        if page is not None and page_size is not None:
+            select += ' LIMIT %s OFFSET %s' % (page_size, (page - 1) * page_size)
+            
+        return self._fetchall(select, query.vars)
+
+    def update_issue(self, issue_id, update, update_time=None, history=None):
+        from datetime import datetime
+        from alerta.utils.format import DateTime
+        
+        update_time = update_time or datetime.utcnow()
+        if isinstance(update_time, datetime):
+            update_time = DateTime.iso8601(update_time)
+        
+        # Подготавливаем значения для обновления
+        update_value = dict()
+        for k, v in update.items():
+            if k in ['alerts', 'hosts', 'project_groups', 'info_systems']:
+                update_value[k] = v
+            elif k == 'attributes' and isinstance(v, dict):
+                update_value[k] = v
+            elif isinstance(v, datetime):
+                # Преобразуем datetime в строку
+                update_value[k] = DateTime.iso8601(v)
+            else:
+                update_value[k] = v
+                
+        if history:
+            # Преобразуем объект history
+            history_dict = vars(history)
+            
+            update['issue_history'] = 'array_append(issue_history, %s::history)' % self._bind_param()
+            update_value['history'] = history_dict
+            
+        cols = ", ".join(['%s=%s' % (k, v) if not isinstance(v, str) else '%s=%s' % (k, self._bind_param())
+                         for k, v in update.items()])
+                         
+        update_query = """
+            UPDATE issues
+            SET %s
+            WHERE id = %s
+            RETURNING *
+        """ % (cols, self._bind_param())
+        
+        kwargs = dict()
+        if update_value:
+            for k, v in update_value.items():
+                kwargs[k] = v
+        kwargs['id'] = issue_id
+        
+        return self._updateone(update_query, kwargs, returning=True)
+
+    def delete_issue(self, issue_id):
+        delete = """
+            DELETE FROM issues
+            WHERE id = %s
+            RETURNING id
+        """
+        return bool(self._delete(delete, (issue_id,)))
+
+    def update_alert_issue_id(self, alert_id, issue_id, history=None):
+        update = """
+            UPDATE alerts
+            SET issue_id = %s
+        """
+        if history:
+            update += ", history=array_append(history, %s::history)"
+            
+        update += " WHERE id = %s RETURNING *"
+        
+        if history:
+            # History уже зарегистрирован через HistoryAdapter
+            # и будет автоматически преобразован при вставке
+            return self._updateone(update, (issue_id, history, alert_id), returning=True)
+        else:
+            return self._updateone(update, (issue_id, alert_id), returning=True)

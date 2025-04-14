@@ -1,4 +1,3 @@
-
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'history' AND typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = current_schema())) THEN
@@ -28,6 +27,31 @@ BEGIN
     END IF;
 END$$;
 
+CREATE TABLE IF NOT EXISTS issues (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    summary TEXT NOT NULL,
+    severity TEXT,
+    host_critical TEXT,
+    duty_admin TEXT,
+    description TEXT,
+    status TEXT,
+    status_duration INTERVAL,
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    last_alert_time TIMESTAMP WITHOUT TIME ZONE,
+    resolve_time TIMESTAMP WITHOUT TIME ZONE,
+    pattern_id INTEGER,
+    inc_key TEXT,
+    slack_link TEXT,
+    disaster_link TEXT,
+    escalation_group TEXT,
+    alerts TEXT[],
+    hosts TEXT[],
+    project_groups TEXT[],
+    info_systems TEXT[],
+    attributes JSONB,
+    master_incident UUID,
+    issue_history history[]
+);
 
 CREATE TABLE IF NOT EXISTS alerts (
     id text PRIMARY KEY,
@@ -56,7 +80,8 @@ CREATE TABLE IF NOT EXISTS alerts (
     receive_time timestamp without time zone,
     last_receive_id text,
     last_receive_time timestamp without time zone,
-    history history[]
+    history history[],
+    issue_id UUID REFERENCES issues(id)
 );
 
 ALTER TABLE alerts ADD COLUMN IF NOT EXISTS update_time timestamp without time zone;
@@ -235,3 +260,5 @@ CREATE INDEX IF NOT EXISTS env_res_evt_cust_key ON alerts USING btree (environme
 
 
 CREATE UNIQUE INDEX IF NOT EXISTS org_cust_key ON heartbeats USING btree (origin, (COALESCE(customer, ''::text)));
+
+ALTER TABLE alerts ADD COLUMN IF NOT EXISTS issue_id UUID REFERENCES issues(id);
