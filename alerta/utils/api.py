@@ -9,7 +9,7 @@ from alerta.exceptions import (AlertaException, ApiError, BlackoutPeriod,
                                ForwardingLoop, HeartbeatReceived,
                                InvalidAction, RateLimit, RejectException)
 from alerta.models.alert import Alert
-from alerta.models.issue import Issue
+from alerta.models.issue import Issue, create_new_issue_for_alert
 from alerta.models.enums import Scope
 from alerta.utils.pattern_cache import PatternCache
 from alerta.utils.format import CustomJSONEncoder
@@ -136,48 +136,12 @@ def process_alert(alert: Alert) -> Alert:
         # Если ни один паттерн не подошел и это новый алерт, создаем новый Issue
         if not pattern_matched and is_new_alert and alert.attributes.get('incident', True):
             try:
-                # Создаем новый Issue на основе данных из Alert
-                logging.debug(f"No pattern matched for alert {alert.id}, creating new Issue")
+                # Используем функцию из модуля issue для создания Issue
+                logging.debug(f"No pattern matched for alert {alert.id}, creating new Issue using create_new_issue_for_alert")
                 
-                # Подготовка необходимых данных для Issue
-                summary = f"Issue for {alert.event} on {alert.resource}"
-                severity = alert.severity
-                description = alert.text
-                
-                # Извлекаем дополнительную информацию из тегов
-                project_groups = []
-                info_systems = []
-                hosts = [alert.resource]
-                
-                for tag in alert.tags:
-                    if tag.startswith('ProjectGroup:'):
-                        project_groups.append(tag.split(':', 1)[1])
-                    elif tag.startswith('InfoSystem:'):
-                        info_systems.append(tag.split(':', 1)[1])
-                
-                # Создаем Issue
-                issue = Issue(
-                    summary=summary,
-                    severity=severity,
-                    description=description,
-                    status='open',
-                    alerts=[alert.id],
-                    hosts=hosts,
-                    project_groups=project_groups,
-                    info_systems=info_systems,
-                    attributes={}
-                )
-                
-                issue = issue.create()
-                logging.debug(f"Created new Issue {issue.id} for alert {alert.id}")
-                
-                # Связываем Alert с Issue
-                alert = alert.link_to_issue(issue.id)
-                logging.debug(f"Linked alert {alert.id} to issue {issue.id}")
-                
-                # Обновляем атрибуты алерта
-                alert.attributes['wasIncident'] = False
-                alert.attributes = alert.update_attributes(alert.attributes)
+                # Вызываем функцию create_new_issue_for_alert
+                alert = create_new_issue_for_alert(alert)
+                logging.debug(f"Alert {alert.id} linked to new issue {alert.issue_id}")
                 
             except Exception as e:
                 logging.error(f"Error creating Issue for alert {alert.id}: {str(e)}")

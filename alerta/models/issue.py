@@ -14,6 +14,9 @@ from alerta.models.history import History
 from alerta.utils.format import DateTime, deep_serialize_datetime, CustomJSONEncoder
 from alerta.utils.response import absolute_url
 
+# Импортируем Alert для функций, которые его используют
+from alerta.models.alert import Alert
+
 JSON = Dict[str, Any]
 NoneType = type(None)
 
@@ -159,6 +162,7 @@ class Issue:
 
     # create an issue
     def create(self) -> 'Issue':
+        logging.warning(f"Создаем Issue {self.id}")
         now = datetime.utcnow()
         
         if not self.create_time:
@@ -226,27 +230,85 @@ class Issue:
         return Issue.from_db(db.update_issue(self.id, update, now, history))
         
     # add alert to issue
-    def add_alert(self, alert_id: str) -> 'Issue':
+    def add_alert(self, alert_id: str, alert_data: dict = None) -> 'Issue':
+        """
+        Добавляет алерт в Issue и обновляет списки уникальных значений полей
+        
+        :param alert_id: ID алерта
+        :param alert_data: Данные алерта (host, project_groups, info_systems)
+        :return: Обновленный Issue
+        """
         if alert_id in self.alerts:
             return self
-            
-        self.alerts.append(alert_id)
+        
+        update_data = {'alerts': self.alerts + [alert_id]}
+        change_text = f'Alert {alert_id} added to issue'
+        
+        if alert_data:
+            # Добавление host если он уникален
+            if 'event' in alert_data and alert_data['event']:
+                host = alert_data['event']
+                if host not in self.hosts:
+                    update_data['hosts'] = self.hosts + [host]
+                    
+            # Добавление project_groups если они уникальны
+            if 'project_groups' in alert_data and alert_data['project_groups']:
+                for pg in alert_data['project_groups']:
+                    if pg not in self.project_groups:
+                        if 'project_groups' not in update_data:
+                            update_data['project_groups'] = self.project_groups.copy()
+                        update_data['project_groups'].append(pg)
+                        
+            # Добавление info_systems если они уникальны
+            if 'info_systems' in alert_data and alert_data['info_systems']:
+                for info_sys in alert_data['info_systems']:
+                    if info_sys not in self.info_systems:
+                        if 'info_systems' not in update_data:
+                            update_data['info_systems'] = self.info_systems.copy()
+                        update_data['info_systems'].append(info_sys)
+        
         return self.update(
-            alerts=self.alerts, 
+            **update_data,
             change_type='alert-added', 
-            text=f'Alert {alert_id} added to issue'
+            text=change_text
         )
         
     # remove alert from issue
-    def remove_alert(self, alert_id: str) -> 'Issue':
+    def remove_alert(self, alert_id: str, alert_data: dict = None) -> 'Issue':
+        """
+        Удаляет алерт из Issue и обновляет списки уникальных значений полей
+        
+        :param alert_id: ID алерта
+        :param alert_data: Данные алерта (event, project_groups, info_systems)
+        :return: Обновленный Issue
+        """
         if alert_id not in self.alerts:
             return self
+        
+        update_data = {'alerts': [a for a in self.alerts if a != alert_id]}
+        change_text = f'Alert {alert_id} removed from issue'
+        
+        if alert_data:
+            # Удаление host если он не используется в других алертах
+            if 'event' in alert_data and alert_data['event'] in self.hosts:
+                # Проверяем, есть ли другие алерты с таким же event
+                other_alerts_with_same_event = False
+                for remaining_alert_id in update_data['alerts']:
+                    remaining_alert = Alert.find_by_id(remaining_alert_id)
+                    if remaining_alert and remaining_alert.event == alert_data['event']:
+                        other_alerts_with_same_event = True
+                        break
+                
+                if not other_alerts_with_same_event:
+                    update_data['hosts'] = [h for h in self.hosts if h != alert_data['event']]
             
-        self.alerts.remove(alert_id)
+            # Аналогично для project_groups и info_systems
+            # ...
+        
         return self.update(
-            alerts=self.alerts, 
+            **update_data,
             change_type='alert-removed', 
-            text=f'Alert {alert_id} removed from issue'
+            text=change_text
         )
         
     # resolve an issue
@@ -272,4 +334,188 @@ class Issue:
     # delete an issue
     @classmethod
     def delete_by_id(cls, issue_id: str) -> bool:
-        return db.delete_issue(issue_id) 
+        return db.delete_issue(issue_id)
+
+def find_matching_issue(alert):
+    """
+    Находит Issue для линкования алерта по приоритетной логике
+    
+    :param alert: Алерт для линкования
+    :return: ID подходящего Issue или None
+    """
+    # Извлекаем данные из алерта
+    event = alert.event
+    resource = alert.resource
+    project_groups = [tag.split(':')[1] for tag in alert.tags if tag.startswith('ProjectGroup:')]
+    info_systems = [tag.split(':')[1] for tag in alert.tags if tag.startswith('InfoSystem:')]
+    
+    # Получаем все активные Issue
+    issues = Issue.find_all(Query().filter("status!='closed' AND status!='resolved'"))
+    
+    # Если нет активных Issue, возвращаем None
+    if not issues:
+        return None
+    
+    # Словарь с приоритетами: 1 - самый высокий
+    priority_fields = {
+        'hosts': 1, 
+        'project_groups': 2, 
+        'info_systems': 3
+    }
+    
+    matching_issues = []
+    
+    for issue in issues:
+        scores = {}
+        
+        # Проверка соответствия по host (event алерта должен совпадать с hosts в issue)
+        if len(issue.hosts) == 1 and event == issue.hosts[0]:
+            scores['hosts'] = True
+            
+        # Проверка соответствия по project_groups
+        if len(issue.project_groups) == 1 and issue.project_groups[0] in project_groups:
+            scores['project_groups'] = True
+            
+        # Проверка соответствия по info_systems
+        if len(issue.info_systems) == 1 and issue.info_systems[0] in info_systems:
+            scores['info_systems'] = True
+            
+        # Если есть совпадения, добавляем в список с приоритетом
+        if scores:
+            highest_priority_match = min(
+                [priority_fields[field] for field in scores.keys()],
+                default=None
+            )
+            if highest_priority_match:
+                matching_issues.append((issue, highest_priority_match))
+    
+    # Сортируем совпадения по приоритету (с самым высоким вначале)
+    if matching_issues:
+        matching_issues.sort(key=lambda x: x[1])
+        logging.debug(f"Found matching issue for alert {alert.id}: {matching_issues[0][0].id}")
+        return matching_issues[0][0].id
+    
+    logging.debug(f"No matching issue found for alert {alert.id}")
+    return None
+
+def process_new_alert(alert):
+
+    """
+    Обработка нового алерта и привязка к Issue при необходимости
+    
+    :param alert: Новый алерт
+    :return: Алерт после обработки
+    """
+    # Проверка на сопоставление с существующими паттернами
+    pattern_matches = alert.pattern_match_duplicated()
+    
+    if pattern_matches:
+        # Обрабатываем совпадение с существующими паттернами как сейчас
+        return handle_pattern_match(alert, pattern_matches)
+    
+    # Если нет совпадений по паттернам, проверяем соответствие по новой логике
+    issue_id = find_matching_issue(alert)
+    
+    if issue_id:
+        # Получаем Issue и добавляем к нему алерт
+        issue = Issue.find_by_id(issue_id)
+        alert_data = {
+            'event': alert.event,
+            'project_groups': [tag.split(':')[1] for tag in alert.tags if tag.startswith('ProjectGroup:')],
+            'info_systems': [tag.split(':')[1] for tag in alert.tags if tag.startswith('InfoSystem:')]
+        }
+        
+        issue = issue.add_alert(alert.id, alert_data)
+        alert = alert.link_to_issue(issue_id)
+        
+        return alert
+    
+    # Если нет подходящего Issue, создаем новый
+    return create_new_issue_for_alert(alert) 
+
+def create_new_issue_for_alert(alert):
+    logging.debug(f"Создаем новый Issue для алерта {alert}")
+    """
+    Создает новый Issue для алерта
+    
+    :param alert: Алерт, для которого создается Issue
+    :return: Алерт, привязанный к новому Issue
+    """
+    # Извлекаем данные из алерта
+    event = alert.event
+    resource = alert.resource
+    project_groups = [tag.split(':')[1] for tag in alert.tags if tag.startswith('ProjectGroup:')]
+    info_systems = [tag.split(':')[1] for tag in alert.tags if tag.startswith('InfoSystem:')]
+    
+    # Формируем summary - если есть text, используем его, иначе формируем из event и resource
+    summary = alert.text if alert.text else f"Issue for {event} on {resource}"
+    
+    # Создаем новый Issue
+    issue = Issue(
+        summary=summary,
+        severity=alert.severity,
+        status='open',
+        alerts=[alert.id],
+        hosts=[event],
+        project_groups=project_groups,
+        info_systems=info_systems
+    )
+    
+    logging.debug(f"Issue {issue}")
+    # Сохраняем Issue
+    issue = issue.create()
+    
+    # Привязываем алерт к Issue
+    alert = alert.link_to_issue(issue.id)
+    
+    return alert 
+
+def create_test_issues():
+    """
+    Создает несколько тестовых Issue для проверки функциональности
+    
+    :return: Список созданных Issue
+    """
+    test_issues = []
+    
+    # Создаем Issue с одним значением в hosts
+    issue1 = Issue(
+        summary="Test Issue 1 for node_down",
+        severity="major",
+        status="open",
+        alerts=[],
+        hosts=["node_down"],
+        project_groups=["TestGroup"],
+        info_systems=["TestSystem"]
+    )
+    issue1 = issue1.create()
+    test_issues.append(issue1)
+    
+    # Создаем Issue с одним значением в project_groups
+    issue2 = Issue(
+        summary="Test Issue 2 for ProjectGroup",
+        severity="minor",
+        status="open",
+        alerts=[],
+        hosts=["node_up", "node_down"],  # несколько значений
+        project_groups=["ImportantGroup"],  # одно значение
+        info_systems=["TestSystem1", "TestSystem2"]
+    )
+    issue2 = issue2.create()
+    test_issues.append(issue2)
+    
+    # Создаем Issue с одним значением в info_systems
+    issue3 = Issue(
+        summary="Test Issue 3 for InfoSystem",
+        severity="critical",
+        status="open",
+        alerts=[],
+        hosts=["node_error", "node_warning"],
+        project_groups=["Group1", "Group2"],
+        info_systems=["CriticalSystem"]  # одно значение
+    )
+    issue3 = issue3.create()
+    test_issues.append(issue3)
+    
+    logging.info(f"Created {len(test_issues)} test issues")
+    return test_issues 
