@@ -46,7 +46,7 @@ The Alerta monitoring tool was developed with the following aims in mind:
 
 ### Requirements
 
-Release 9 only supports Python 3.9 or higher.
+Release 9 only supports Python 3.9-3.12.
 
 The only mandatory dependency is MongoDB or PostgreSQL. Everything else is optional.
 
@@ -59,7 +59,7 @@ Below are the steps to set up and run the Alerta backend on a local machine for 
 
 #### Prerequisites:
 
-- Python 3.9 or higher
+- Python 3.9-3.12
 - Docker for running PostgreSQL
 - Git for cloning the repository (if applicable)
 
@@ -122,7 +122,7 @@ export FLASK_DEBUG=1
 flask run --port 8080
 ```
 
-> **Note**: After starting, the API will be available at http://localhost:8080/api
+> **Note**: After starting, the API will be available at http://localhost:8080/
 
 #### 5. Create admin account
 
