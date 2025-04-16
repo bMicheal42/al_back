@@ -283,10 +283,12 @@ class Issue:
         
         severity_order = {'medium': 3, 'high': 4, 'critical': 5}
         
-        # Наборы для уникальных значений
+        # Наборы для уникальных значений хостов
         events = set(self.hosts) if self.hosts else set()
-        project_groups_set = set(self.project_groups) if self.project_groups else set()
-        info_systems_set = set(self.info_systems) if self.info_systems else set()
+        
+        # Берем первое значение project_group и info_system из существующих в issue
+        project_group = self.project_groups[0] if self.project_groups else None
+        info_system = self.info_systems[0] if self.info_systems else None
         
         # Проходим по всем алертам и обновляем максимальные значения
         for alert in alerts:
@@ -306,7 +308,7 @@ class Issue:
                         logging.debug(f"Обновление host_critical Issue {self.id} на {alert_host_critical}")
                         max_host_critical = alert_host_critical
                         update_data['host_critical'] = alert_host_critical
-                
+
                 # Проверяем last_alert_time
                 if alert.create_time:
                     if not max_last_alert_time or alert.create_time > max_last_alert_time:
@@ -319,24 +321,27 @@ class Issue:
                 if event:
                     events.add(event)
                 
-                # Извлекаем project_groups и info_systems из тегов
-                for tag in alert.tags:
-                    if tag.startswith('ProjectGroup:'):
-                        pg = tag.split(':', 1)[1]
-                        project_groups_set.add(pg)
-                    elif tag.startswith('InfoSystem:'):
-                        info_sys = tag.split(':', 1)[1]
-                        info_systems_set.add(info_sys)
+                # Если у issue еще не установлены project_group или info_system,
+                # используем значения из первого алерта, который мы добавляем
+                if project_group is None or info_system is None:
+                    for tag in alert.tags:
+                        if project_group is None and tag.startswith('ProjectGroup:'):
+                            project_group = tag.split(':', 1)[1]
+                            logging.debug(f"Устанавливаем project_group для Issue {self.id}: {project_group}")
+                        elif info_system is None and tag.startswith('InfoSystem:'):
+                            info_system = tag.split(':', 1)[1]
+                            logging.debug(f"Устанавливаем info_system для Issue {self.id}: {info_system}")
         
         # Обновляем значения только если они изменились
         if events != set(self.hosts):
             update_data['hosts'] = list(events)
         
-        if project_groups_set != set(self.project_groups):
-            update_data['project_groups'] = list(project_groups_set)
+        # Обновляем project_group и info_system, если они были изменены
+        if project_group is not None and (not self.project_groups or project_group != self.project_groups[0]):
+            update_data['project_groups'] = [project_group]
             
-        if info_systems_set != set(self.info_systems):
-            update_data['info_systems'] = list(info_systems_set)
+        if info_system is not None and (not self.info_systems or info_system != self.info_systems[0]):
+            update_data['info_systems'] = [info_system]
         
         logging.debug(f"Update data for issue {self.id}: {update_data}")
         
@@ -399,10 +404,12 @@ class Issue:
             # Подгружаем информацию о всех оставшихся алертах за один запрос
             remaining_alerts = Alert.find_by_ids(remaining_alert_ids)
             
-            # Наборы для уникальных значений
+            # Наборы для уникальных значений хостов
             events = set()
-            project_groups_set = set()
-            info_systems_set = set()
+            
+            # Используем первое значение project_group и info_system из оставшихся алертов
+            project_group = None
+            info_system = None
             
             # Инициализируем максимальные значения
             max_severity = 'medium'
@@ -434,14 +441,15 @@ class Issue:
                 if alert.event:
                     events.add(alert.event)
                 
-                # Извлекаем project_groups и info_systems из тегов
-                for tag in alert.tags:
-                    if tag.startswith('ProjectGroup:'):
-                        pg = tag.split(':', 1)[1]
-                        project_groups_set.add(pg)
-                    elif tag.startswith('InfoSystem:'):
-                        info_sys = tag.split(':', 1)[1]
-                        info_systems_set.add(info_sys)
+                # Если еще не определены project_group и info_system, берем из первого алерта
+                if project_group is None or info_system is None:
+                    for tag in alert.tags:
+                        if project_group is None and tag.startswith('ProjectGroup:'):
+                            project_group = tag.split(':', 1)[1]
+                            logging.debug(f"Используем project_group из оставшегося алерта: {project_group}")
+                        elif info_system is None and tag.startswith('InfoSystem:'):
+                            info_system = tag.split(':', 1)[1]
+                            logging.debug(f"Используем info_system из оставшегося алерта: {info_system}")
             
             # Обновляем значения в Issue
             if max_severity != self.severity:
@@ -457,15 +465,17 @@ class Issue:
                 logging.debug(f"Обновление last_alert_time Issue {self.id} на {max_last_alert_time}")
                 update_data['last_alert_time'] = max_last_alert_time
             
-            # Обновляем списки hosts, project_groups и info_systems
+            # Обновляем hosts
             if events != set(self.hosts):
                 update_data['hosts'] = list(events)
-                
-            if project_groups_set != set(self.project_groups):
-                update_data['project_groups'] = list(project_groups_set)
-                
-            if info_systems_set != set(self.info_systems):
-                update_data['info_systems'] = list(info_systems_set)
+            
+            # Обновляем project_group если он изменился или пустой
+            if project_group is not None and (not self.project_groups or project_group != self.project_groups[0]):
+                update_data['project_groups'] = [project_group]
+            
+            # Обновляем info_system если он изменился или пустой
+            if info_system is not None and (not self.info_systems or info_system != self.info_systems[0]):
+                update_data['info_systems'] = [info_system]
         
         logging.debug(f"Update data for issue {self.id}: {update_data}")
         
@@ -507,7 +517,8 @@ class Issue:
 def find_matching_issue(alert):
     """
     Находит Issue для связывания с алертом на основе логики приоритета и общих полей.
-    Приоритет полей для сопоставления: хосты (event) > группы проектов > информационные системы.
+    Приоритет полей для сопоставления: хосты (event) > (project_group + info_system)
+    Теперь требуется совпадение и project_group, и info_system для группировки.
     """
     logging.debug(f"Поиск подходящего Issue для алерта {alert.id}")
     
@@ -525,6 +536,10 @@ def find_matching_issue(alert):
             info_systems.append(tag.split(':', 1)[1])
     
     logging.debug(f"Ищем Issue, соответствующие: event={event}, project_groups={project_groups}, info_systems={info_systems}")
+    
+    # Если нет project_group или info_system, то нельзя группировать по ним
+    if not project_groups or not info_systems:
+        logging.debug(f"У алерта отсутствует project_group или info_system, группировка только по event")
     
     # Получаем все активные Issue
     # Используем объект Query из alerta.database.base
@@ -546,19 +561,27 @@ def find_matching_issue(alert):
             score += 100  # Высший приоритет - соответствие event
             logging.debug(f"Issue {issue.id}: совпадение по event (+100)")
         
-        # Проверяем project_groups
-        if hasattr(issue, 'project_groups') and project_groups:
+        # Проверка на совпадение и project_group, и info_system
+        # Требуется, чтобы и project_group, и info_system совпадали
+        if project_groups and info_systems and hasattr(issue, 'project_groups') and hasattr(issue, 'info_systems'):
+            # Проверяем совпадение project_group
+            project_group_match = False
             for pg in project_groups:
                 if pg in issue.project_groups:
-                    score += 10  # Средний приоритет - соответствие группы проектов
-                    logging.debug(f"Issue {issue.id}: совпадение по project_group {pg} (+10)")
-        
-        # Проверяем info_systems
-        if hasattr(issue, 'info_systems') and info_systems:
+                    project_group_match = True
+                    break
+            
+            # Проверяем совпадение info_system
+            info_system_match = False
             for is_ in info_systems:
                 if is_ in issue.info_systems:
-                    score += 1  # Низкий приоритет - соответствие информационной системы
-                    logging.debug(f"Issue {issue.id}: совпадение по info_system {is_} (+1)")
+                    info_system_match = True
+                    break
+            
+            # Если совпали и project_group, и info_system
+            if project_group_match and info_system_match:
+                score += 20  # Более высокий приоритет для совпадения обоих полей
+                logging.debug(f"Issue {issue.id}: совпадение по project_group и info_system (+20)")
         
         # Если есть совпадения, добавляем в список
         if score > 0:
@@ -663,19 +686,29 @@ def create_new_issue_for_alert(alert):
     event = alert.event
     resource = alert.resource
     
-    # Извлекаем теги проектных групп и информационных систем
-    project_groups = []
-    info_systems = []
+    # Извлекаем первый тег проектной группы и информационной системы
+    project_group = None
+    info_system = None
     
     for tag in alert.tags:
         if ':' in tag:
             key, value = tag.split(':', 1)
-            if key == 'ProjectGroup':
-                project_groups.append(value)
+            if key == 'ProjectGroup' and project_group is None:
+                project_group = value
                 logging.debug(f"Extracted ProjectGroup tag: {value}")
-            elif key == 'InfoSystem':
-                info_systems.append(value)
+            elif key == 'InfoSystem' and info_system is None:
+                info_system = value
                 logging.debug(f"Extracted InfoSystem tag: {value}")
+    
+    # Если не нашли project_group или info_system, логируем предупреждение
+    if project_group is None:
+        logging.warning(f"No ProjectGroup tag found for alert {alert.id}")
+    if info_system is None:
+        logging.warning(f"No InfoSystem tag found for alert {alert.id}")
+    
+    # Преобразуем в списки с одним элементом или пустые списки
+    project_groups = [project_group] if project_group else []
+    info_systems = [info_system] if info_system else []
     
     # Формируем summary - если есть text, используем его, иначе формируем из event и resource
     summary = alert.text if alert.text else f"Issue for {event} on {resource}"
