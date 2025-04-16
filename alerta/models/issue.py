@@ -238,122 +238,8 @@ class Issue:
             logging.error(f"Error updating Issue {self.id}: {str(e)}")
             # Возвращаем текущий объект, если обновление не удалось
             return self
-        
-    # add alert to issue
-    def add_alert(self, alert) -> 'Issue':
-        """
-        Добавляет алерт в Issue и обновляет списки уникальных значений полей
-        
-        :param alert: Объект Alert, который нужно добавить к Issue
-        :return: Обновленный Issue
-        """
-        return self.mass_add_alerts([alert])
 
-    # массовое добавление алертов к issue
-    def mass_add_alerts(self, alerts: List) -> 'Issue':
-        """
-        Массовое добавление алертов в Issue и обновление списков уникальных значений полей
-        
-        :param alerts: Список объектов Alert, которые нужно добавить к Issue
-        :return: Обновленный Issue
-        """
-        if not alerts:
-            logging.debug(f"Список алертов для добавления пуст")
-            return self
-            
-        alert_ids = []
-        for alert in alerts:
-            if alert.id not in self.alerts and alert.id not in alert_ids:
-                alert_ids.append(alert.id)
-                
-        if not alert_ids:
-            logging.debug(f"Все алерты уже привязаны к Issue {self.id}")
-            return self
-            
-        logging.debug(f"Добавление {len(alert_ids)} алертов к Issue {self.id}")
-        
-        # Создаем копию текущих списков для обновления
-        update_data = {'alerts': self.alerts + alert_ids}
-        change_text = f'Added {len(alert_ids)} alerts to issue'
-        
-        # Инициализируем переменные для отслеживания максимальных значений
-        max_severity = self.severity if self.severity else 'medium'
-        max_host_critical = str(self.host_critical) if self.host_critical else '1'
-        max_last_alert_time = self.last_alert_time
-        
-        severity_order = {'medium': 3, 'high': 4, 'critical': 5}
-        
-        # Наборы для уникальных значений хостов
-        events = set(self.hosts) if self.hosts else set()
-        
-        # Берем первое значение project_group и info_system из существующих в issue
-        project_group = self.project_groups[0] if self.project_groups else None
-        info_system = self.info_systems[0] if self.info_systems else None
-        
-        # Проходим по всем алертам и обновляем максимальные значения
-        for alert in alerts:
-            if alert.id not in self.alerts:
-                # Проверяем severity
-                alert_severity = alert.severity if alert.severity else 'medium'
-                # Если severity алерта не в словаре, считаем её как 'medium'
-                if severity_order.get(alert_severity, 3) > severity_order.get(max_severity, 3):
-                    logging.debug(f"Обновление severity Issue {self.id} на {alert_severity}")
-                    max_severity = alert_severity
-                    update_data['severity'] = alert_severity
-                
-                # Проверяем host_critical
-                if hasattr(alert, 'attributes') and 'host_critical' in alert.attributes:
-                    alert_host_critical = str(alert.attributes.get('host_critical'))
-                    if alert_host_critical != max_host_critical:
-                        logging.debug(f"Обновление host_critical Issue {self.id} на {alert_host_critical}")
-                        max_host_critical = alert_host_critical
-                        update_data['host_critical'] = alert_host_critical
 
-                # Проверяем last_alert_time
-                if alert.create_time:
-                    if not max_last_alert_time or alert.create_time > max_last_alert_time:
-                        logging.debug(f"Обновление last_alert_time Issue {self.id} на {alert.create_time}")
-                        max_last_alert_time = alert.create_time
-                        update_data['last_alert_time'] = alert.create_time
-                
-                # Добавляем event
-                event = alert.event
-                if event:
-                    events.add(event)
-                
-                # Если у issue еще не установлены project_group или info_system,
-                # используем значения из первого алерта, который мы добавляем
-                if project_group is None or info_system is None:
-                    for tag in alert.tags:
-                        if project_group is None and tag.startswith('ProjectGroup:'):
-                            project_group = tag.split(':', 1)[1]
-                            logging.debug(f"Устанавливаем project_group для Issue {self.id}: {project_group}")
-                        elif info_system is None and tag.startswith('InfoSystem:'):
-                            info_system = tag.split(':', 1)[1]
-                            logging.debug(f"Устанавливаем info_system для Issue {self.id}: {info_system}")
-        
-        # Обновляем значения только если они изменились
-        if events != set(self.hosts):
-            update_data['hosts'] = list(events)
-        
-        # Обновляем project_group и info_system, если они были изменены
-        if project_group is not None and (not self.project_groups or project_group != self.project_groups[0]):
-            update_data['project_groups'] = [project_group]
-            
-        if info_system is not None and (not self.info_systems or info_system != self.info_systems[0]):
-            update_data['info_systems'] = [info_system]
-        
-        logging.debug(f"Update data for issue {self.id}: {update_data}")
-        
-        # Обновляем Issue
-        updated_issue = self.update(
-            **update_data,
-            change_type='alerts-added', 
-            text=change_text
-        )
-        
-        logging.info(f"Successfully added {len(alert_ids)} alerts to issue {self.id}")
-        return updated_issue
 
     # remove alert from issue
     def remove_alert(self, alert_id: str) -> 'Issue':
@@ -363,7 +249,7 @@ class Issue:
         :param alert_id: ID алерта, который нужно удалить
         :return: Обновленный Issue
         """
-        return self.mass_remove_alerts([alert_id])
+        return self.mass_remove_alerts_sql([alert_id])
         
     # массовое удаление алертов из issue
     def mass_remove_alerts(self, alert_ids: List[str]) -> 'Issue':
@@ -372,123 +258,11 @@ class Issue:
         
         :param alert_ids: Список ID алертов, которые нужно удалить
         :return: Обновленный Issue
+        
+        @deprecated Используйте mass_remove_alerts_sql вместо этого метода
         """
-        if not alert_ids:
-            logging.debug(f"Список алертов для удаления пуст")
-            return self
-            
-        # Фильтруем только те ID, которые действительно есть в Issue
-        alert_ids_to_remove = [a_id for a_id in alert_ids if a_id in self.alerts]
-        
-        if not alert_ids_to_remove:
-            logging.debug(f"Нет алертов для удаления из Issue {self.id}")
-            return self
-            
-        logging.debug(f"Удаление {len(alert_ids_to_remove)} алертов из Issue {self.id}")
-        
-        # Определяем оставшиеся алерты
-        remaining_alert_ids = [a_id for a_id in self.alerts if a_id not in alert_ids_to_remove]
-        update_data = {'alerts': remaining_alert_ids}
-        change_text = f'Removed {len(alert_ids_to_remove)} alerts from issue'
-        
-        # Если это были последние алерты в Issue, Issue будет закрыт
-        if not remaining_alert_ids:
-            logging.debug(f"Last alerts removed from issue {self.id}, issue will be closed")
-            update_data['status'] = 'closed'
-            update_data['resolve_time'] = datetime.utcnow()
-            change_text += ' (issue closed as no alerts remain)'
-        else:
-            # Если остались алерты, пересчитываем severity, host_critical и last_alert_time
-            from alerta.models.alert import Alert
-            
-            # Подгружаем информацию о всех оставшихся алертах за один запрос
-            remaining_alerts = Alert.find_by_ids(remaining_alert_ids)
-            
-            # Наборы для уникальных значений хостов
-            events = set()
-            
-            # Используем первое значение project_group и info_system из оставшихся алертов
-            project_group = None
-            info_system = None
-            
-            # Инициализируем максимальные значения
-            max_severity = 'medium'
-            max_host_critical = '1'  # По умолчанию host_critical = 1
-            max_last_alert_time = None
-            
-            severity_order = {'medium': 3, 'high': 4, 'critical': 5}
-            
-            # Проходим по всем оставшимся алертам и пересчитываем значения
-            for alert in remaining_alerts:
-                # Проверяем severity
-                alert_severity = alert.severity if alert.severity else 'medium'
-                # Если severity алерта не в словаре, считаем её как 'medium'
-                if severity_order.get(alert_severity, 3) > severity_order.get(max_severity, 3):
-                    max_severity = alert_severity
-                
-                # Проверяем host_critical
-                if hasattr(alert, 'attributes') and 'host_critical' in alert.attributes:
-                    alert_host_critical = str(alert.attributes.get('host_critical'))
-                    if alert_host_critical != max_host_critical:
-                        max_host_critical = alert_host_critical
-                
-                # Проверяем create_time
-                if alert.create_time:
-                    if not max_last_alert_time or alert.create_time > max_last_alert_time:
-                        max_last_alert_time = alert.create_time
-                
-                # Добавляем event
-                if alert.event:
-                    events.add(alert.event)
-                
-                # Если еще не определены project_group и info_system, берем из первого алерта
-                if project_group is None or info_system is None:
-                    for tag in alert.tags:
-                        if project_group is None and tag.startswith('ProjectGroup:'):
-                            project_group = tag.split(':', 1)[1]
-                            logging.debug(f"Используем project_group из оставшегося алерта: {project_group}")
-                        elif info_system is None and tag.startswith('InfoSystem:'):
-                            info_system = tag.split(':', 1)[1]
-                            logging.debug(f"Используем info_system из оставшегося алерта: {info_system}")
-            
-            # Обновляем значения в Issue
-            if max_severity != self.severity:
-                logging.debug(f"Обновление severity Issue {self.id} на {max_severity}")
-                update_data['severity'] = max_severity
-                
-            current_host_critical = str(self.host_critical) if self.host_critical else '1'
-            if str(max_host_critical) != current_host_critical:
-                logging.debug(f"Обновление host_critical Issue {self.id} на {max_host_critical}")
-                update_data['host_critical'] = max_host_critical
-                
-            if max_last_alert_time and max_last_alert_time != self.last_alert_time:
-                logging.debug(f"Обновление last_alert_time Issue {self.id} на {max_last_alert_time}")
-                update_data['last_alert_time'] = max_last_alert_time
-            
-            # Обновляем hosts
-            if events != set(self.hosts):
-                update_data['hosts'] = list(events)
-            
-            # Обновляем project_group если он изменился или пустой
-            if project_group is not None and (not self.project_groups or project_group != self.project_groups[0]):
-                update_data['project_groups'] = [project_group]
-            
-            # Обновляем info_system если он изменился или пустой
-            if info_system is not None and (not self.info_systems or info_system != self.info_systems[0]):
-                update_data['info_systems'] = [info_system]
-        
-        logging.debug(f"Update data for issue {self.id}: {update_data}")
-        
-        # Обновляем Issue
-        updated_issue = self.update(
-            **update_data,
-            change_type='alerts-removed', 
-            text=change_text
-        )
-        
-        logging.info(f"Successfully removed {len(alert_ids_to_remove)} alerts from issue {self.id}")
-        return updated_issue
-        
+        return self.mass_remove_alerts_sql(alert_ids)
+
     # resolve an issue
     def resolve(self, text: str = '') -> 'Issue':
         now = datetime.utcnow()
@@ -513,6 +287,170 @@ class Issue:
     @classmethod
     def delete_by_id(cls, issue_id: str) -> bool:
         return db.delete_issue(issue_id)
+
+    # массовое удаление алертов из issue с использованием SQL-агрегации
+    def mass_remove_alerts_sql(self, alert_ids: List[str]) -> 'Issue':
+        """
+        Массовое удаление алертов из Issue с использованием SQL-агрегации
+        для обновления атрибутов.
+        
+        :param alert_ids: Список ID алертов, которые нужно удалить
+        :return: Обновленный Issue
+        """
+        if not alert_ids:
+            logging.debug(f"Список алертов для удаления пуст")
+            return self
+        
+        # Фильтруем только те ID, которые действительно есть в Issue
+        alert_ids_to_remove = [a_id for a_id in alert_ids if a_id in self.alerts]
+        
+        if not alert_ids_to_remove:
+            logging.debug(f"Нет алертов для удаления из Issue {self.id}")
+            return self
+        
+        logging.debug(f"Удаление {len(alert_ids_to_remove)} алертов из Issue {self.id}")
+        
+        # Определяем оставшиеся алерты
+        remaining_alert_ids = [a_id for a_id in self.alerts if a_id not in alert_ids_to_remove]
+        update_data = {'alerts': remaining_alert_ids}
+        change_text = f'Removed {len(alert_ids_to_remove)} alerts from issue'
+        
+        # Если это были последние алерты в Issue, Issue будет закрыт
+        if not remaining_alert_ids:
+            logging.debug(f"Last alerts removed from issue {self.id}, issue will be closed")
+            update_data['status'] = 'closed'
+            update_data['resolve_time'] = datetime.utcnow()
+            update_data['hosts'] = []
+            update_data['project_groups'] = []
+            update_data['info_systems'] = []
+            change_text += ' (issue closed as no alerts remain)'
+            
+            # Обновляем Issue в БД
+            updated_issue = self.update(
+                **update_data,
+                change_type='alerts-removed',
+                text=change_text
+            )
+            
+            # В случае закрытия issue, мы отвязываем все алерты
+            from alerta.models.alert import Alert
+            Alert.mass_unlink_from_issue(alert_ids_to_remove, self.id)
+            
+            return updated_issue
+        else:
+            # Обновляем список алертов
+            updated_issue = self.update(
+                alerts=remaining_alert_ids,
+                change_type='alerts-removed',
+                text=change_text
+            )
+            
+            # Используем оптимизированный метод для массового отлинкования алертов от issue
+            from alerta.models.alert import Alert
+            Alert.mass_unlink_from_issue(alert_ids_to_remove, self.id)
+            
+            # Обновляем атрибуты Issue с помощью SQL-агрегации
+            updated_issue = updated_issue.update_with_sql_aggregation()
+            
+            return updated_issue
+
+    # обновление атрибутов Issue с использованием SQL-агрегации
+    def update_with_sql_aggregation(self) -> 'Issue':
+        """
+        Обновляет атрибуты Issue на основе связанных алертов,
+        используя SQL-запросы для агрегации данных.
+        
+        :return: Обновленный Issue
+        """
+        if not self.id:
+            logging.warning("Невозможно обновить Issue без ID")
+            return self
+        
+        # Получаем обновленные атрибуты с помощью SQL
+        updated_attrs = recalculate_issue_attributes_sql(self.id)
+        
+        # Если обновления отсутствуют, возвращаем текущий Issue
+        if not updated_attrs:
+            logging.debug(f"Нет обновлений для Issue {self.id}")
+            return self
+        
+        # Обновляем Issue
+        return self.update(
+            **updated_attrs,
+            change_type='attributes-recalculated',
+            text='Issue attributes recalculated with SQL aggregation'
+        )
+
+    def mass_add_alerts(self, alerts: List) -> 'Issue':
+        """
+        Оптимизированное массовое добавление алертов к Issue 
+        с использованием SQL для проверки уникальности.
+        
+        :param alerts: Список объектов Alert, которые нужно добавить
+        :return: Обновленный Issue
+        """
+        if not alerts:
+            logging.debug(f"Список алертов для добавления пуст")
+            return self
+        
+        # Собираем идентификаторы алертов для добавления
+        alert_ids_to_add = [alert.id for alert in alerts]
+        
+        # Используем SQL для фильтрации только уникальных идентификаторов,
+        # которых еще нет в текущем issue
+        from alerta.app import db
+        cursor = db.get_db().cursor()
+        
+        # SQL-запрос для получения только новых уникальных alert_ids
+        sql = """
+        WITH issue_alerts AS (
+            SELECT unnest(%s::text[]) AS alert_id
+        )
+        SELECT DISTINCT ia.alert_id 
+        FROM issue_alerts ia
+        WHERE 
+            ia.alert_id NOT IN (
+                SELECT unnest(alerts) 
+                FROM issues 
+                WHERE id = %s
+            )
+            AND ia.alert_id NOT IN (
+                SELECT id FROM alerts 
+                WHERE issue_id IS NOT NULL AND issue_id != %s
+            )
+        """
+        
+        # Выполняем запрос
+        cursor.execute(sql, (alert_ids_to_add, self.id, self.id))
+        new_alert_ids = [row[0] for row in cursor.fetchall()]
+        new_alerts_count = len(new_alert_ids)
+        cursor.close()
+        
+        if not new_alert_ids:
+            logging.debug(f"Все алерты уже привязаны к Issue {self.id}")
+            return self
+        
+        logging.debug(f"Добавление {new_alerts_count} новых алертов к Issue {self.id}")
+        
+        # Обновляем текущий список алертов
+        current_alerts = self.alerts if hasattr(self, 'alerts') else []
+        
+        # Обновляем Issue добавляя новые alert_ids
+        updated_issue = self.update(
+            alerts=current_alerts + new_alert_ids,
+            change_type='alerts-added',
+            text=f'Added {new_alerts_count} alerts to issue'
+        )
+        
+        # Используем оптимизированный метод для массового линкования алертов к issue
+        from alerta.models.alert import Alert
+        Alert.mass_link_to_issue(new_alert_ids, self.id)
+        
+        # Обновляем атрибуты Issue с помощью SQL-агрегации
+        updated_issue = updated_issue.update_with_sql_aggregation()
+        
+        logging.info(f"Successfully added {new_alerts_count} alerts to issue {self.id}")
+        return updated_issue
 
 def find_matching_issue(alert):
     """
@@ -544,7 +482,7 @@ def find_matching_issue(alert):
     # Получаем все активные Issue
     # Используем объект Query из alerta.database.base
     from alerta.database.base import Query
-    query = Query(where="status!='closed' AND status!='resolved'", sort="create_time DESC", group="")
+    query = Query(where="status!='closed'", sort="create_time DESC", group="")
     issues = Issue.find_all(query)
     
     logging.debug(f"Найдено активных Issue: {len(issues)}")
@@ -745,3 +683,35 @@ def create_new_issue_for_alert(alert):
     logging.info(f"Linked alert {alert.id} to Issue {issue.id}")
     
     return alert
+
+
+def recalculate_issue_attributes_sql(issue_id: str) -> Dict[str, Any]:
+    """
+    Пересчитывает атрибуты Issue на основе связанных алертов, используя SQL-запросы
+    для агрегации данных.
+    
+    :param issue_id: ID Issue, для которого требуется пересчитать атрибуты
+    :return: Словарь с обновленными атрибутами Issue
+    """
+    from alerta.app import db
+    
+    logging.debug(f"Пересчет атрибутов для Issue {issue_id} с использованием SQL-агрегации")
+    
+    # Получаем все агрегированные атрибуты за один вызов
+    agg_attrs = db.get_issue_aggregated_attributes(issue_id)
+    
+    # Формируем словарь с обновленными атрибутами
+    updated_attrs = {
+        'severity': agg_attrs['severity'],
+        'host_critical': '1' if agg_attrs['host_critical'] else '0',
+        'hosts': agg_attrs['hosts'],
+        'project_groups': agg_attrs['project_groups'],
+        'info_systems': agg_attrs['info_systems']
+    }
+    
+    # Добавляем last_alert_time, если оно есть
+    if agg_attrs['last_alert_time']:
+        updated_attrs['last_alert_time'] = agg_attrs['last_alert_time']
+    
+    logging.debug(f"Результат SQL-агрегации для Issue {issue_id}: {updated_attrs}")
+    return updated_attrs

@@ -2458,3 +2458,236 @@ class Backend(Database):
             return self._updateone(update, (issue_id, history, alert_id), returning=True)
         else:
             return self._updateone(update, (issue_id, alert_id), returning=True)
+
+    def get_issue_max_severity(self, issue_id):
+        """
+        Получает максимальное значение severity среди алертов, связанных с issue_id.
+        
+        :param issue_id: ID проблемы
+        :return: Максимальная severity или 'normal', если нет алертов
+        """
+        select = """
+            SELECT MAX(CASE
+                WHEN severity = 'critical' THEN 5
+                WHEN severity = 'major' THEN 4
+                WHEN severity = 'minor' THEN 3
+                WHEN severity = 'warning' THEN 2
+                ELSE 1
+            END) AS max_sev
+            FROM alerts
+            WHERE issue_id = %s AND status != 'expired'
+        """
+        cursor = self.get_db().cursor()
+        cursor.execute(select, (issue_id,))
+        result = cursor.fetchone()
+        cursor.close()
+        
+        # Преобразовать числовое значение обратно в текст
+        if result and result[0]:
+            max_sev = result[0]
+            if max_sev == 5:
+                return 'critical'
+            elif max_sev == 4:
+                return 'major'
+            elif max_sev == 3:
+                return 'minor'
+            elif max_sev == 2:
+                return 'warning'
+        
+        return 'normal'
+    
+    def get_issue_host_critical(self, issue_id):
+        """
+        Проверяет, есть ли хотя бы один алерт с host_critical='1' для issue_id.
+        
+        :param issue_id: ID проблемы
+        :return: True если есть хотя бы один критичный хост, иначе False
+        """
+        select = """
+            SELECT COUNT(*)
+            FROM alerts
+            WHERE issue_id = %s AND attributes->>'host_critical' = '1' AND status != 'expired'
+        """
+        cursor = self.get_db().cursor()
+        cursor.execute(select, (issue_id,))
+        result = cursor.fetchone()
+        cursor.close()
+        
+        return result[0] > 0 if result else False
+    
+    def get_issue_unique_hosts(self, issue_id):
+        """
+        Получает список уникальных хостов из алертов, связанных с issue_id.
+        
+        :param issue_id: ID проблемы
+        :return: Список уникальных хостов
+        """
+        select = """
+            SELECT DISTINCT event
+            FROM alerts
+            WHERE issue_id = %s AND status != 'expired'
+            ORDER BY event
+        """
+        cursor = self.get_db().cursor()
+        cursor.execute(select, (issue_id,))
+        result = cursor.fetchall()
+        cursor.close()
+        
+        return [r[0] for r in result] if result else []
+    
+    def get_issue_unique_tag_values(self, issue_id, tag_prefix):
+        """
+        Получает список уникальных значений тегов с указанным префиксом
+        из алертов, связанных с issue_id.
+        
+        :param issue_id: ID проблемы
+        :param tag_prefix: Префикс тегов для поиска (например, 'project_group.' или 'info_system.')
+        :return: Список уникальных значений тегов
+        """
+        # Ищем все теги, которые начинаются с указанного префикса
+        select = """
+            SELECT DISTINCT t.tag_value
+            FROM alerts a, 
+                LATERAL unnest(a.tags) t(tag_value)
+            WHERE a.issue_id = %s 
+              AND a.status != 'expired'
+              AND t.tag_value LIKE %s
+            ORDER BY t.tag_value
+        """
+        cursor = self.get_db().cursor()
+        cursor.execute(select, (issue_id, f"{tag_prefix}%"))
+        result = cursor.fetchall()
+        cursor.close()
+        
+        # Удаляем префикс из значений тегов
+        prefix_len = len(tag_prefix)
+        return [r[0][prefix_len:] for r in result if len(r[0]) > prefix_len] if result else []
+    
+    def get_issue_last_alert_time(self, issue_id):
+        """
+        Получает время создания самого последнего алерта для issue_id.
+        
+        :param issue_id: ID проблемы
+        :return: Время создания последнего алерта или None
+        """
+        select = """
+            SELECT MAX(create_time)
+            FROM alerts
+            WHERE issue_id = %s AND status != 'expired'
+        """
+        cursor = self.get_db().cursor()
+        cursor.execute(select, (issue_id,))
+        result = cursor.fetchone()
+        cursor.close()
+        
+        return result[0] if result and result[0] else None
+    
+    def get_issue_aggregated_attributes(self, issue_id):
+        """
+        Получает все агрегированные атрибуты для issue_id за один запрос.
+        
+        :param issue_id: ID проблемы
+        :return: Словарь с агрегированными атрибутами
+        """
+        # Используем CTE (Common Table Expression) для получения базового набора алертов
+        sql = """
+        WITH issue_alerts AS (
+            SELECT *
+            FROM alerts
+            WHERE issue_id = %s AND status != 'expired'
+        ),
+        -- Вычисляем максимальное severity
+        max_severity AS (
+            SELECT 
+                CASE 
+                    WHEN MAX(CASE
+                        WHEN severity = 'critical' THEN 5
+                        WHEN severity = 'high' THEN 4
+                        WHEN severity = 'medium' THEN 3
+                        ELSE 1
+                    END) = 5 THEN 'critical'
+                    WHEN MAX(CASE
+                        WHEN severity = 'critical' THEN 5
+                        WHEN severity = 'high' THEN 4
+                        WHEN severity = 'medium' THEN 3
+                        ELSE 1
+                    END) = 4 THEN 'high'
+                    WHEN MAX(CASE
+                        WHEN severity = 'critical' THEN 5
+                        WHEN severity = 'high' THEN 4
+                        WHEN severity = 'medium' THEN 3
+                        ELSE 1
+                    END) = 3 THEN 'medium'
+                    ELSE 'normal'
+                END AS severity
+            FROM issue_alerts
+        ),
+        -- Проверяем наличие критичных хостов
+        host_critical AS (
+            SELECT 
+                CASE 
+                    WHEN COUNT(*) > 0 THEN TRUE 
+                    ELSE FALSE 
+                END AS is_critical
+            FROM issue_alerts
+            WHERE attributes->>'host_critical' = '1'
+        ),
+        -- Собираем уникальные events (хосты)
+        unique_hosts AS (
+            SELECT array_agg(DISTINCT event ORDER BY event) AS hosts
+            FROM issue_alerts
+        ),
+        -- Собираем уникальные project_groups
+        project_groups AS (
+            SELECT array_agg(DISTINCT substring(t.tag_value FROM 15)) AS project_groups
+            FROM issue_alerts a, 
+                LATERAL unnest(a.tags) t(tag_value)
+            WHERE t.tag_value LIKE 'project_group.%'
+        ),
+        -- Собираем уникальные info_systems
+        info_systems AS (
+            SELECT array_agg(DISTINCT substring(t.tag_value FROM 12)) AS info_systems
+            FROM issue_alerts a, 
+                LATERAL unnest(a.tags) t(tag_value)
+            WHERE t.tag_value LIKE 'info_system.%'
+        ),
+        -- Получаем last_alert_time
+        last_alert_time AS (
+            SELECT MAX(create_time) AS last_time
+            FROM issue_alerts
+        )
+        
+        -- Собираем все вычисленные данные
+        SELECT 
+            (SELECT severity FROM max_severity) AS severity,
+            (SELECT is_critical FROM host_critical) AS host_critical,
+            (SELECT hosts FROM unique_hosts) AS hosts,
+            (SELECT project_groups FROM project_groups) AS project_groups,
+            (SELECT info_systems FROM info_systems) AS info_systems,
+            (SELECT last_time FROM last_alert_time) AS last_alert_time
+        """
+        cursor = self.get_db().cursor()
+        cursor.execute(sql, (issue_id,))
+        result = cursor.fetchone()
+        cursor.close()
+        
+        if not result:
+            return {
+                'severity': 'normal',
+                'host_critical': False,
+                'hosts': [],
+                'project_groups': [],
+                'info_systems': [],
+                'last_alert_time': None
+            }
+        
+        # Сформируем словарь с результатами
+        keys = ['severity', 'host_critical', 'hosts', 'project_groups', 'info_systems', 'last_alert_time']
+        result_dict = {k: v for k, v in zip(keys, result)}
+        
+        # Преобразуем пустые массивы из None в пустой список
+        for array_key in ['hosts', 'project_groups', 'info_systems']:
+            if result_dict[array_key] is None:
+                result_dict[array_key] = []
+        
+        return result_dict

@@ -206,7 +206,7 @@ def add_alert_to_issue(issue_id, alert_id):
         
     try:
         alert = alert.link_to_issue(issue_id)
-        issue = issue.add_alert(alert_id)
+        issue = issue.mass_add_alerts(alert_id)
     except Exception as e:
         raise ApiError(str(e), 500)
         
