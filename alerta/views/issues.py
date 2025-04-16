@@ -66,17 +66,22 @@ def list_issues():
     total = 0
     issues = []
 
-    query = qb.from_params(query_params)
+    query = qb.issues.from_params(query_params)
     issues = Issue.find_all(query, page.page, page.page_size)
     total = len(issues)
+
+
+    # костыль чтобы начало работать
+    total_pages = total // page.page_size + (1 if total % page.page_size > 0 else 0)
+    has_more = page.page < total_pages
 
     if issues:
         return jsonify(
             status='ok',
             page=page.page,
             pageSize=page.page_size,
-            pages=page.pages(total),
-            more=page.has_more(total),
+            pages=total_pages,
+            more=has_more,
             issues=[issue.serialize for issue in issues],
             total=total
         )

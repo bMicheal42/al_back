@@ -560,6 +560,7 @@ class QueryBuilder(Base):
         self.__class__.groups = type('GroupsQueryBuilder', (cls.Groups, self.Groups, QueryBuilder), {})
         self.__class__.perms = type('PermissionsQueryBuilder', (cls.Permissions, self.Permissions, QueryBuilder), {})
         self.__class__.customers = type('CustomersQueryBuilder', (cls.Customers, self.Customers, QueryBuilder), {})
+        self.__class__.issues = type('IssuesQueryBuilder', (self.Issues, QueryBuilder), {})
 
     class Alerts:
 
@@ -608,3 +609,12 @@ class QueryBuilder(Base):
         @staticmethod
         def from_params(params, customers=None, query_time=None):
             raise NotImplementedError('CustomersQueryBuilder has no from_params() method')
+
+    class Issues:
+        @staticmethod
+        def from_params(params, customers=None, query_time=None):
+            where = ['']
+            sort = 'create_time'
+            group = ''
+                
+            return Query(where=' AND '.join(where), sort=sort, group=group)
