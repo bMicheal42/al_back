@@ -59,7 +59,9 @@ def get_issue(issue_id):
 @jsonp
 def list_issues():
     query_params = request.args.to_dict()
-    page = Page.from_params(query_params)
+
+    #  костыль чтобы начало работать
+    page = Page.from_params(query_params, 1000)
 
     total = 0
     issues = []

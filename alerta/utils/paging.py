@@ -18,11 +18,13 @@ class Page:
     @staticmethod
     def from_params(params: MultiDict, items: int) -> 'Page':
         # page, page-size, limit (deprecated)
-        page = params.get('page', 1, int)
-        limit = params.get('limit', 0, int)
-        page_size = params.get('page-size', limit, int)
-
-        return Page(page, page_size, items)
+        try:
+            page = int(params.get('page', 1))
+            limit = int(params.get('limit', 0))
+            page_size = int(params.get('page-size', limit))
+            return Page(page, page_size, items)
+        except:
+            return ApiError('we')
 
     @property
     def pages(self) -> int:
