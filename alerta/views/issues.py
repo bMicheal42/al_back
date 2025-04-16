@@ -10,6 +10,7 @@ from alerta.utils.api import assign_customer
 from alerta.utils.audit import write_audit_trail
 from alerta.utils.paging import Page
 from alerta.utils.response import jsonp
+from alerta.database.base import Query
 
 from . import api
 
@@ -158,19 +159,13 @@ def get_issue_alerts(issue_id):
     if not issue:
         raise ApiError('Issue not found', 404)
         
-    query = {'issue_id': issue_id}
-    page = Page.from_params(request.args)
-    
-    alerts = Alert.find_all(query, page.page, page.page_size)
+    query = Query(where=f"issue_id='{issue_id}'", sort="create_time DESC", group="")
+    alerts = Alert.find_all_really(query)
     
     if alerts:
         return jsonify(
             status='ok',
             issue=issue.serialize,
-            page=page.page,
-            pageSize=page.page_size,
-            pages=page.pages(len(alerts)),
-            more=page.has_more(len(alerts)),
             alerts=[alert.serialize for alert in alerts],
             total=len(alerts)
         )
@@ -178,10 +173,6 @@ def get_issue_alerts(issue_id):
         return jsonify(
             status='ok',
             issue=issue.serialize,
-            page=page.page,
-            pageSize=page.page_size,
-            pages=0,
-            more=False,
             alerts=[],
             total=0
         )
