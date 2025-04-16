@@ -26,7 +26,7 @@ def set_alerts_status(alerts):
     errors = []
 
     if not alerts:
-        logger.warning("No alerts to close")
+        logger.info("No alerts to close")
         return 0, 0
 
     for alert in alerts:
@@ -57,7 +57,7 @@ def set_alerts_status(alerts):
                     alert.update_attributes(alert.attributes)
 
                     updated.append(alert.id)  # Track successful update
-                    logger.debug(f"Successfully closed alert {alert.id}")
+                    logger.info(f"Successfully closed alert {alert.id}")
 
                 except Exception as e:
                     error_msg = f"Failed to update alert {getattr(alert, 'id', 'unknown')}: {str(e)}"
@@ -72,13 +72,13 @@ def set_alerts_status(alerts):
     if errors:
         logger.error(f"Failed to close {len(errors)} alerts: {errors}")
     if updated:
-        logger.warning(f"Successfully closed {len(updated)} alerts")
+        logger.info(f"Successfully closed {len(updated)} alerts")
     return len(updated), len(errors)
 
 
 def poll_zabbix_events(event_ids):
     if not event_ids:
-        logger.warning("No event IDs provided to poll_zabbix_events")
+        logger.info("No event IDs provided to poll_zabbix_events")
         return []
 
     zabbix = zabbix_login()
@@ -87,7 +87,7 @@ def poll_zabbix_events(event_ids):
         return []
 
     try:
-        logger.warning(f"Polling Zabbix for {len(event_ids)} events")
+        logger.info(f"Polling Zabbix for {len(event_ids)} events")
 
         # Convert all event_ids to strings for consistent comparison
         event_ids_str = [str(eid) for eid in event_ids if eid]
@@ -102,7 +102,7 @@ def poll_zabbix_events(event_ids):
 
         # Validate events response
         if not events:
-            logger.warning("No events returned from Zabbix API")
+            logger.info("No events returned from Zabbix API")
             return event_ids_str  # Return all event IDs to be closed if nothing found in Zabbix
 
         if not isinstance(events, list):
@@ -137,15 +137,13 @@ def poll_zabbix_events(event_ids):
             # Add to event map with string key
             event_map[str(event_data['eventid'])] = event_data
 
-        logger.debug(f"Created event map with {len(event_map)} entries")
-
         # Process each event ID to determine which should be closed
         updated_event_ids = []
         for event_id in event_ids:
             event_id_str = str(event_id)
 
             if event_id_str in event_map:
-                logger.debug(f"Processing event ID: {event_id_str}")
+                logger.info(f"Processing event ID: {event_id_str}")
                 event = event_map[event_id_str]
 
                 trigger_status = event.get('trigger_status', -1)
@@ -154,21 +152,21 @@ def poll_zabbix_events(event_ids):
 
                 if trigger_status == 1:
                     updated_event_ids.append(event_id)
-                    logger.debug(f"Event {event_id} - trigger is DISABLED")
+                    logger.info(f"Event {event_id} - trigger is DISABLED")
                 elif not has_hosts:
                     updated_event_ids.append(event_id)
-                    logger.debug(f"Event {event_id} - host was DELETED")
+                    logger.info(f"Event {event_id} - host was DELETED")
                 elif r_eventid != '0':
                     # updated_event_ids.append(event_id) //TODO пока выключим, так как тяжеоло аффектит МАСТЕР АЛЕРТЫ
-                    logger.debug(f"Event {event_id} - is in OK state")
+                    logger.info(f"Event {event_id} - is in OK state")
                 else:
-                    logger.debug(f"Event {event_id} - remains in ERROR state")
+                    logger.info(f"Event {event_id} - remains in ERROR state")
             else:
                 # Event not found in Zabbix - mark for closing
                 updated_event_ids.append(event_id)
-                logger.debug(f"Event {event_id} not found in Zabbix")
+                logger.info(f"Event {event_id} not found in Zabbix")
 
-        logger.debug(f"Found {len(updated_event_ids)} events to close")
+        logger.info(f"Found {len(updated_event_ids)} events to close")
         return updated_event_ids
 
     except Exception as e:
@@ -190,7 +188,7 @@ def get_error_alerts_older_than(minutes=5):
             group=[]
         )
         alerts = Alert.find_all_really(query=query)
-        logger.debug(f"Found {len(alerts)} open alerts older than {minutes} minutes")
+        logger.info(f"Found {len(alerts)} open alerts older than {minutes} minutes")
         return alerts
 
     except Exception as e:
@@ -209,7 +207,7 @@ def check_alerts_for_close(app):
     with app.app_context():
         alerts = get_error_alerts_older_than()
         if not alerts:
-            logger.debug("No open alerts to process")
+            logger.info("No open alerts to process")
             return
 
         event_map = {}
@@ -221,12 +219,12 @@ def check_alerts_for_close(app):
             event_map.setdefault(event_id, []).append(alert)
 
         if not event_map:
-            logger.debug("No alerts with Zabbix event IDs found")
+            logger.info("No alerts with Zabbix event IDs found")
             return
 
         event_ids_to_close = poll_zabbix_events(list(event_map.keys()))
         if not event_ids_to_close:
-            logger.debug("No Zabbix events to close")
+            logger.info("No Zabbix events to close")
             return
 
         event_ids_tuple = tuple(str(eid) for eid in event_ids_to_close)
@@ -241,18 +239,18 @@ def check_alerts_for_close(app):
 
         filtered_alerts = Alert.find_all_really(query_filtered_alerts)  # Find alerts to close
         if not filtered_alerts:
-            logger.debug("No matching alerts to close")
+            logger.info("No matching alerts to close")
             return
-        logger.debug(f"Found {len(filtered_alerts)} alerts to close")
+        logger.info(f"Found {len(filtered_alerts)} alerts to close")
 
         g.login = "admin" # Set user for audit trail
 
         try:
             success_count, error_count = set_alerts_status(filtered_alerts)
             if success_count > 0:
-                logger.debug(f"Successfully closed {success_count} alerts from Zabbix events")
+                logger.info(f"Successfully closed {success_count} alerts from Zabbix events")
             if error_count > 0:
-                logger.debug(f"Failed to close {error_count} alerts")
+                logger.info(f"Failed to close {error_count} alerts")
 
         except Exception as exc:
             logger.exception(f"Unexpected error when closing alerts: {exc}")

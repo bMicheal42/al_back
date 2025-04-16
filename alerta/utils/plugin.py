@@ -59,8 +59,8 @@ class Plugins:
             self.rules = load_entry_point(routing_dist, 'alerta.routing', 'rules')  # type: ignore
         except (DistributionNotFound, ImportError):
             no_rules_msg = 'No plugin routing rules found. All plugins will be evaluated.'
-            print(no_rules_msg)
-            LOG.warning(no_rules_msg)
+            # print(no_rules_msg)
+            # LOG.warning(no_rules_msg)
 
     def routing(self, alert: 'Alert') -> 'Tuple[Iterable[PluginBase], Config]':
         try:

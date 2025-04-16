@@ -9,7 +9,7 @@ from alerta.exceptions import (AlertaException, ApiError, BlackoutPeriod,
                                ForwardingLoop, HeartbeatReceived,
                                InvalidAction, RateLimit, RejectException)
 from alerta.models.alert import Alert
-from alerta.models.issue import Issue, create_new_issue_for_alert
+from alerta.models.issue import Issue, create_new_issue_for_alert, find_matching_issue, process_new_alert
 from alerta.models.enums import Scope
 from alerta.utils.pattern_cache import PatternCache
 from alerta.utils.format import CustomJSONEncoder
@@ -46,7 +46,6 @@ def process_alert(alert: Alert) -> Alert:
 
         cache = PatternCache()
         patterns = cache.get_patterns()
-        logging.warning(f"Loaded patterns from cache: {patterns}")
         
         # Флаг для отслеживания, найден ли соответствующий паттерн
         pattern_matched = False
@@ -58,7 +57,6 @@ def process_alert(alert: Alert) -> Alert:
                 # check if pattern matches alert
                 matches = alert.pattern_match_duplicated(pattern_query=pattern['sql_rule'])
                 if matches:
-                    logging.warning(f"Match found for pattern '{pattern['name']}' with alert {alert.id}")
                     # print(f"Match found for pattern '{pattern['name']}' with alert {alert.id}")
 
                     incident = matches[0]  # picking first match as incident
@@ -134,17 +132,16 @@ def process_alert(alert: Alert) -> Alert:
                 logging.error(f"Error while matching pattern '{pattern['name']}': {str(e)}")
         
         # Если ни один паттерн не подошел и это новый алерт, создаем новый Issue
-        if not pattern_matched and is_new_alert and alert.attributes.get('incident', True):
-            try:
-                # Используем функцию из модуля issue для создания Issue
-                logging.debug(f"No pattern matched for alert {alert.id}, creating new Issue using create_new_issue_for_alert")
-                
-                # Вызываем функцию create_new_issue_for_alert
-                alert = create_new_issue_for_alert(alert)
-                logging.debug(f"Alert {alert.id} linked to new issue {alert.issue_id}")
-                
-            except Exception as e:
-                logging.error(f"Error creating Issue for alert {alert.id}: {str(e)}")
+
+        try:
+            # Используем функцию из модуля issue для создания Issue
+            logging.debug(f"No pattern matched for alert {alert.id}, creating new Issue using create_new_issue_for_alert")
+            
+            # Вызываем функцию create_new_issue_for_alert
+            issue_found = process_new_alert(alert)
+            
+        except Exception as e:
+            logging.error(f"Error creating Issue for alert {alert.id}: {str(e)}")
 
     except Exception as e:
         raise ApiError(str(e))

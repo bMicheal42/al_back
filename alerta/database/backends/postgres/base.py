@@ -99,6 +99,13 @@ class Backend(Database):
         from alerta.models.alert import History
         register_adapter(History, HistoryAdapter)
 
+    def _bind_param(self):
+        """
+        Возвращает плейсхолдер для параметра в SQL запросе в зависимости от драйвера БД.
+        Для PostgreSQL это %s
+        """
+        return '%s'
+        
     def connect(self):
         retry = 0
         while True:
@@ -2348,31 +2355,20 @@ class Backend(Database):
         query = query or Query()
         select = """
             SELECT * FROM issues
-            WHERE 1=1
-        """
-        if query.get('id'):
-            select += ' AND id = %(id)s'
-        if query.get('summary'):
-            select += ' AND summary ~* %(summary)s'
-        if query.get('status'):
-            select += ' AND status = ANY(%(status)s)'
-        if query.get('alert'):
-            select += ' AND %(alert)s = ANY(alerts)'
-        if query.get('from-date'):
-            select += ' AND create_time >= %(from-date)s'
-        if query.get('to-date'):
-            select += ' AND create_time <= %(to-date)s'
-
-        select += ' ORDER BY create_time DESC'
-        
-        if page is not None and page_size is not None:
-            select += ' LIMIT %s OFFSET %s' % (page_size, (page - 1) * page_size)
+            WHERE {where}
+            ORDER BY {sort}
+        """.format(
+            where=query.where or 'true',
+            sort=query.sort or 'create_time DESC'
+        )
             
-        return self._fetchall(select, query.vars)
+        return self._fetchall(select, query.vars, limit=page_size*5000, offset=0)
 
     def update_issue(self, issue_id, update, update_time=None, history=None):
         from datetime import datetime
         from alerta.utils.format import DateTime
+        import logging
+        import json
         
         update_time = update_time or datetime.utcnow()
         if isinstance(update_time, datetime):
@@ -2382,7 +2378,17 @@ class Backend(Database):
         update_value = dict()
         for k, v in update.items():
             if k in ['alerts', 'hosts', 'project_groups', 'info_systems']:
-                update_value[k] = v
+                # Убедимся, что эти поля всегда списки
+                if isinstance(v, list):
+                    update_value[k] = v
+                else:
+                    logging.error(f"Поле {k} должно быть списком, но получено {type(v)}")
+                    # Преобразуем в список если это возможно
+                    if hasattr(v, '__iter__') and not isinstance(v, (str, dict)):
+                        update_value[k] = list(v)
+                    else:
+                        # Создаем пустой список, чтобы избежать ошибки
+                        update_value[k] = []
             elif k == 'attributes' and isinstance(v, dict):
                 update_value[k] = v
             elif isinstance(v, datetime):
@@ -2390,31 +2396,39 @@ class Backend(Database):
                 update_value[k] = DateTime.iso8601(v)
             else:
                 update_value[k] = v
-                
+        
         if history:
             # Преобразуем объект history
             history_dict = vars(history)
-            
-            update['issue_history'] = 'array_append(issue_history, %s::history)' % self._bind_param()
             update_value['history'] = history_dict
             
-        cols = ", ".join(['%s=%s' % (k, v) if not isinstance(v, str) else '%s=%s' % (k, self._bind_param())
-                         for k, v in update.items()])
-                         
+        # Формируем части SET запроса и параметры безопасно
+        set_parts = []
+        sql_params = []
+        
+        for k, v in update.items():
+            if k == 'issue_history' and history:
+                set_parts.append(f"{k}=array_append({k}, %s::history)")
+                sql_params.append(history_dict)
+            else:
+                set_parts.append(f"{k}=%s")
+                sql_params.append(update_value.get(k, v))
+        
+        # Добавляем параметр ID в конец списка
+        sql_params.append(issue_id)
+        
+        # Формируем SQL запрос с безопасным подходом к параметрам
         update_query = """
             UPDATE issues
-            SET %s
+            SET {}
             WHERE id = %s
             RETURNING *
-        """ % (cols, self._bind_param())
+        """.format(", ".join(set_parts))
         
-        kwargs = dict()
-        if update_value:
-            for k, v in update_value.items():
-                kwargs[k] = v
-        kwargs['id'] = issue_id
+        logging.debug(f"Выполняется запрос обновления для Issue {issue_id}: {update_query}")
+        logging.debug(f"Параметры: {sql_params}")
         
-        return self._updateone(update_query, kwargs, returning=True)
+        return self._updateone(update_query, tuple(sql_params), returning=True)
 
     def delete_issue(self, issue_id):
         delete = """

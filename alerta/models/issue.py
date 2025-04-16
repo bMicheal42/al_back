@@ -2,6 +2,7 @@ import logging
 import os
 import platform
 import sys
+from collections import namedtuple
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Union, Tuple
 from uuid import uuid4
@@ -212,6 +213,7 @@ class Issue:
                     update[attr] = value
         
         if not update:
+            logging.debug(f"No updates to apply to Issue {self.id}")
             return self
             
         history = History(
@@ -227,7 +229,15 @@ class Issue:
         
         self.issue_history.append(history)
         
-        return Issue.from_db(db.update_issue(self.id, update, now, history))
+        try:
+            logging.debug(f"Sending update for Issue {self.id}: {update}")
+            updated_issue = Issue.from_db(db.update_issue(self.id, update, now, history))
+            logging.debug(f"Issue {self.id} successfully updated")
+            return updated_issue
+        except Exception as e:
+            logging.error(f"Error updating Issue {self.id}: {str(e)}")
+            # Возвращаем текущий объект, если обновление не удалось
+            return self
         
     # add alert to issue
     def add_alert(self, alert_id: str, alert_data: dict = None) -> 'Issue':
@@ -235,44 +245,64 @@ class Issue:
         Добавляет алерт в Issue и обновляет списки уникальных значений полей
         
         :param alert_id: ID алерта
-        :param alert_data: Данные алерта (host, project_groups, info_systems)
+        :param alert_data: Данные алерта (event, project_groups, info_systems)
         :return: Обновленный Issue
         """
+        logging.debug(f"Adding alert {alert_id} to issue {self.id}")
+        
         if alert_id in self.alerts:
+            logging.debug(f"Alert {alert_id} already in issue {self.id}")
             return self
         
+        # Создаем копию текущих списков для обновления
         update_data = {'alerts': self.alerts + [alert_id]}
         change_text = f'Alert {alert_id} added to issue'
         
         if alert_data:
-            # Добавление host если он уникален
+            # Добавление event если он уникален
             if 'event' in alert_data and alert_data['event']:
-                host = alert_data['event']
-                if host not in self.hosts:
-                    update_data['hosts'] = self.hosts + [host]
+                event = alert_data['event']
+                if event not in self.hosts:
+                    logging.debug(f"Adding unique event '{event}' to issue {self.id}")
+                    update_data['hosts'] = self.hosts + [event]
+                else:
+                    logging.debug(f"Event '{event}' already in issue {self.id}")
                     
             # Добавление project_groups если они уникальны
             if 'project_groups' in alert_data and alert_data['project_groups']:
+                project_groups_to_add = []
                 for pg in alert_data['project_groups']:
                     if pg not in self.project_groups:
-                        if 'project_groups' not in update_data:
-                            update_data['project_groups'] = self.project_groups.copy()
-                        update_data['project_groups'].append(pg)
+                        logging.debug(f"Adding unique project_group '{pg}' to issue {self.id}")
+                        project_groups_to_add.append(pg)
+                    else:
+                        logging.debug(f"Project group '{pg}' already in issue {self.id}")
+                        
+                if project_groups_to_add:
+                    update_data['project_groups'] = self.project_groups + project_groups_to_add
                         
             # Добавление info_systems если они уникальны
             if 'info_systems' in alert_data and alert_data['info_systems']:
+                info_systems_to_add = []
                 for info_sys in alert_data['info_systems']:
                     if info_sys not in self.info_systems:
-                        if 'info_systems' not in update_data:
-                            update_data['info_systems'] = self.info_systems.copy()
-                        update_data['info_systems'].append(info_sys)
+                        logging.debug(f"Adding unique info_system '{info_sys}' to issue {self.id}")
+                        info_systems_to_add.append(info_sys)
+                    else:
+                        logging.debug(f"Info system '{info_sys}' already in issue {self.id}")
+                        
+                if info_systems_to_add:
+                    update_data['info_systems'] = self.info_systems + info_systems_to_add
         
-        return self.update(
+        # Обновляем Issue
+        updated_issue = self.update(
             **update_data,
             change_type='alert-added', 
             text=change_text
         )
         
+        logging.info(f"Alert {alert_id} successfully added to issue {self.id}")
+        return updated_issue
     # remove alert from issue
     def remove_alert(self, alert_id: str, alert_data: dict = None) -> 'Issue':
         """
@@ -282,34 +312,112 @@ class Issue:
         :param alert_data: Данные алерта (event, project_groups, info_systems)
         :return: Обновленный Issue
         """
+        logging.debug(f"Removing alert {alert_id} from issue {self.id}")
+        
         if alert_id not in self.alerts:
+            logging.debug(f"Alert {alert_id} not in issue {self.id}")
             return self
         
         update_data = {'alerts': [a for a in self.alerts if a != alert_id]}
         change_text = f'Alert {alert_id} removed from issue'
         
+        # Если это был последний алерт в Issue, Issue будет закрыт
+        if not update_data['alerts']:
+            logging.debug(f"Last alert removed from issue {self.id}, issue will be closed")
+            update_data['status'] = 'closed'
+            update_data['resolve_time'] = datetime.utcnow()
+            change_text += ' (issue closed as no alerts remain)'
+        
         if alert_data:
-            # Удаление host если он не используется в других алертах
+            # Удаление event из hosts, если он больше не используется в других алертах
             if 'event' in alert_data and alert_data['event'] in self.hosts:
+                event = alert_data['event']
+                
                 # Проверяем, есть ли другие алерты с таким же event
                 other_alerts_with_same_event = False
                 for remaining_alert_id in update_data['alerts']:
-                    remaining_alert = Alert.find_by_id(remaining_alert_id)
-                    if remaining_alert and remaining_alert.event == alert_data['event']:
-                        other_alerts_with_same_event = True
-                        break
+                    try:
+                        remaining_alert = Alert.find_by_id(remaining_alert_id)
+                        if remaining_alert and remaining_alert.event == event:
+                            other_alerts_with_same_event = True
+                            logging.debug(f"Event {event} still used by alert {remaining_alert_id}")
+                            break
+                    except Exception as e:
+                        logging.error(f"Error checking alert {remaining_alert_id}: {str(e)}")
                 
                 if not other_alerts_with_same_event:
-                    update_data['hosts'] = [h for h in self.hosts if h != alert_data['event']]
+                    logging.debug(f"Removing unused event {event} from issue {self.id}")
+                    update_data['hosts'] = [h for h in self.hosts if h != event]
             
-            # Аналогично для project_groups и info_systems
-            # ...
+            # Удаление project_groups, если они больше не используются в других алертах
+            if 'project_groups' in alert_data and alert_data['project_groups']:
+                project_groups_to_remove = []
+                
+                for pg in alert_data['project_groups']:
+                    if pg in self.project_groups:
+                        # Проверяем, используется ли project_group в других алертах
+                        pg_used = False
+                        for remaining_alert_id in update_data['alerts']:
+                            try:
+                                remaining_alert = Alert.find_by_id(remaining_alert_id)
+                                if remaining_alert:
+                                    # Извлекаем project_groups из тегов
+                                    alert_pgs = [tag.split(':', 1)[1] for tag in remaining_alert.tags 
+                                                if tag.startswith('ProjectGroup:')]
+                                    if pg in alert_pgs:
+                                        pg_used = True
+                                        logging.debug(f"Project group {pg} still used by alert {remaining_alert_id}")
+                                        break
+                            except Exception as e:
+                                logging.error(f"Error checking alert {remaining_alert_id}: {str(e)}")
+                        
+                        if not pg_used:
+                            logging.debug(f"Removing unused project group {pg} from issue {self.id}")
+                            project_groups_to_remove.append(pg)
+                
+                if project_groups_to_remove:
+                    update_data['project_groups'] = [pg for pg in self.project_groups 
+                                                    if pg not in project_groups_to_remove]
+            
+            # Удаление info_systems, если они больше не используются в других алертах
+            if 'info_systems' in alert_data and alert_data['info_systems']:
+                info_systems_to_remove = []
+                
+                for info_sys in alert_data['info_systems']:
+                    if info_sys in self.info_systems:
+                        # Проверяем, используется ли info_system в других алертах
+                        info_sys_used = False
+                        for remaining_alert_id in update_data['alerts']:
+                            try:
+                                remaining_alert = Alert.find_by_id(remaining_alert_id)
+                                if remaining_alert:
+                                    # Извлекаем info_systems из тегов
+                                    alert_info_systems = [tag.split(':', 1)[1] for tag in remaining_alert.tags 
+                                                        if tag.startswith('InfoSystem:')]
+                                    if info_sys in alert_info_systems:
+                                        info_sys_used = True
+                                        logging.debug(f"Info system {info_sys} still used by alert {remaining_alert_id}")
+                                        break
+                            except Exception as e:
+                                logging.error(f"Error checking alert {remaining_alert_id}: {str(e)}")
+                        
+                        if not info_sys_used:
+                            logging.debug(f"Removing unused info system {info_sys} from issue {self.id}")
+                            info_systems_to_remove.append(info_sys)
+                
+                if info_systems_to_remove:
+                    update_data['info_systems'] = [info_sys for info_sys in self.info_systems 
+                                                  if info_sys not in info_systems_to_remove]
         
-        return self.update(
+        # Обновляем Issue
+        updated_issue = self.update(
             **update_data,
             change_type='alert-removed', 
             text=change_text
         )
+        
+        logging.info(f"Alert {alert_id} successfully removed from issue {self.id}")
+        return updated_issue
         
     # resolve an issue
     def resolve(self, text: str = '') -> 'Issue':
@@ -338,114 +446,186 @@ class Issue:
 
 def find_matching_issue(alert):
     """
-    Находит Issue для линкования алерта по приоритетной логике
-    
-    :param alert: Алерт для линкования
-    :return: ID подходящего Issue или None
+    Находит Issue для связывания с алертом на основе логики приоритета и общих полей.
+    Приоритет полей для сопоставления: хосты (event) > группы проектов > информационные системы.
     """
-    # Извлекаем данные из алерта
+    logging.debug(f"Поиск подходящего Issue для алерта {alert.id}")
+    
+    # Извлекаем event из алерта
     event = alert.event
-    resource = alert.resource
-    project_groups = [tag.split(':')[1] for tag in alert.tags if tag.startswith('ProjectGroup:')]
-    info_systems = [tag.split(':')[1] for tag in alert.tags if tag.startswith('InfoSystem:')]
+    
+    # Извлекаем теги группы проекта и информационной системы из алерта
+    project_groups = []
+    info_systems = []
+    
+    for tag in alert.tags:
+        if tag.startswith('ProjectGroup:'):
+            project_groups.append(tag.split(':', 1)[1])
+        elif tag.startswith('InfoSystem:'):
+            info_systems.append(tag.split(':', 1)[1])
+    
+    logging.debug(f"Ищем Issue, соответствующие: event={event}, project_groups={project_groups}, info_systems={info_systems}")
     
     # Получаем все активные Issue
-    issues = Issue.find_all(Query().filter("status!='closed' AND status!='resolved'"))
+    # Используем объект Query из alerta.database.base
+    from alerta.database.base import Query
+    query = Query(where="status!='closed' AND status!='resolved'", sort="create_time DESC", group="")
+    issues = Issue.find_all(query)
     
-    # Если нет активных Issue, возвращаем None
-    if not issues:
-        return None
+    logging.debug(f"Найдено активных Issue: {len(issues)}")
     
-    # Словарь с приоритетами: 1 - самый высокий
-    priority_fields = {
-        'hosts': 1, 
-        'project_groups': 2, 
-        'info_systems': 3
-    }
-    
+    # Массив для хранения подходящих Issue с приоритетами
     matching_issues = []
     
+    # Проверяем каждый Issue на соответствие
     for issue in issues:
-        scores = {}
+        score = 0
         
-        # Проверка соответствия по host (event алерта должен совпадать с hosts в issue)
-        if len(issue.hosts) == 1 and event == issue.hosts[0]:
-            scores['hosts'] = True
-            
-        # Проверка соответствия по project_groups
-        if len(issue.project_groups) == 1 and issue.project_groups[0] in project_groups:
-            scores['project_groups'] = True
-            
-        # Проверка соответствия по info_systems
-        if len(issue.info_systems) == 1 and issue.info_systems[0] in info_systems:
-            scores['info_systems'] = True
-            
-        # Если есть совпадения, добавляем в список с приоритетом
-        if scores:
-            highest_priority_match = min(
-                [priority_fields[field] for field in scores.keys()],
-                default=None
-            )
-            if highest_priority_match:
-                matching_issues.append((issue, highest_priority_match))
+        # Проверяем hosts (event)
+        if hasattr(issue, 'hosts') and event in issue.hosts:
+            score += 100  # Высший приоритет - соответствие event
+            logging.debug(f"Issue {issue.id}: совпадение по event (+100)")
+        
+        # Проверяем project_groups
+        if hasattr(issue, 'project_groups') and project_groups:
+            for pg in project_groups:
+                if pg in issue.project_groups:
+                    score += 10  # Средний приоритет - соответствие группы проектов
+                    logging.debug(f"Issue {issue.id}: совпадение по project_group {pg} (+10)")
+        
+        # Проверяем info_systems
+        if hasattr(issue, 'info_systems') and info_systems:
+            for is_ in info_systems:
+                if is_ in issue.info_systems:
+                    score += 1  # Низкий приоритет - соответствие информационной системы
+                    logging.debug(f"Issue {issue.id}: совпадение по info_system {is_} (+1)")
+        
+        # Если есть совпадения, добавляем в список
+        if score > 0:
+            matching_issues.append((issue.id, score))
+            logging.debug(f"Issue {issue.id} добавлен в список совпадений с приоритетом {score}")
     
-    # Сортируем совпадения по приоритету (с самым высоким вначале)
+    # Сортируем по приоритету (по убыванию)
+    matching_issues.sort(key=lambda x: x[1], reverse=True)
+    
     if matching_issues:
-        matching_issues.sort(key=lambda x: x[1])
-        logging.debug(f"Found matching issue for alert {alert.id}: {matching_issues[0][0].id}")
-        return matching_issues[0][0].id
+        best_match_id = matching_issues[0][0]
+        logging.debug(f"Найден подходящий Issue: {best_match_id} с приоритетом {matching_issues[0][1]}")
+        return best_match_id
     
-    logging.debug(f"No matching issue found for alert {alert.id}")
+    logging.debug("Не найдено подходящих Issue")
     return None
 
 def process_new_alert(alert):
-
     """
     Обработка нового алерта и привязка к Issue при необходимости
     
     :param alert: Новый алерт
     :return: Алерт после обработки
     """
+    logging.debug(f"Processing new alert {alert.id} (event={alert.event})")
+    
     # Проверка на сопоставление с существующими паттернами
-    pattern_matches = alert.pattern_match_duplicated()
+    pattern_matches = None
+    try:
+        pattern_matches = alert.pattern_match_duplicated()
+        if pattern_matches:
+            logging.debug(f"Found pattern matches for alert {alert.id}")
+    except Exception as e:
+        logging.error(f"Error during pattern matching: {str(e)}")
     
     if pattern_matches:
-        # Обрабатываем совпадение с существующими паттернами как сейчас
-        return handle_pattern_match(alert, pattern_matches)
+        # Обрабатываем совпадение с существующими паттернами
+        try:
+            from alerta.utils.api import process_alert
+            logging.debug(f"Processing alert {alert.id} with patterns")
+            result = process_alert(alert)
+            logging.debug(f"Alert {alert.id} processed with patterns")
+            return result
+        except Exception as e:
+            logging.error(f"Error processing alert with patterns: {str(e)}")
+            logging.error(f"Falling back to Issue-based processing")
     
     # Если нет совпадений по паттернам, проверяем соответствие по новой логике
-    issue_id = find_matching_issue(alert)
+    issue_id = None
+    try:
+        issue_id = find_matching_issue(alert)
+    except Exception as e:
+        logging.error(f"Error finding matching issue: {str(e)}")
     
     if issue_id:
-        # Получаем Issue и добавляем к нему алерт
-        issue = Issue.find_by_id(issue_id)
-        alert_data = {
-            'event': alert.event,
-            'project_groups': [tag.split(':')[1] for tag in alert.tags if tag.startswith('ProjectGroup:')],
-            'info_systems': [tag.split(':')[1] for tag in alert.tags if tag.startswith('InfoSystem:')]
-        }
-        
-        issue = issue.add_alert(alert.id, alert_data)
-        alert = alert.link_to_issue(issue_id)
-        
-        return alert
+        try:
+            # Получаем Issue и добавляем к нему алерт
+            issue = Issue.find_by_id(issue_id)
+            logging.warning(f"ISSUESSSS: {[issue]}")
+            
+            # Извлекаем данные алерта
+            project_groups = []
+            info_systems = []
+            
+            for tag in alert.tags:
+                if tag.startswith('ProjectGroup:'):
+                    project_groups.append(tag.split(':', 1)[1])
+                elif tag.startswith('InfoSystem:'):
+                    info_systems.append(tag.split(':', 1)[1])
+            
+            alert_data = {
+                'event': alert.event,
+                'project_groups': project_groups,
+                'info_systems': info_systems
+            }
+            
+            try:
+                # Добавляем алерт к Issue
+                issue = issue.add_alert(alert.id, alert_data)
+                
+                # Связываем алерт с Issue
+                alert = alert.link_to_issue(issue_id)
+                
+                logging.info(f"Added alert {alert.id} to existing issue {issue_id}")
+                return alert
+            except Exception as e:
+                logging.error(f"Error adding alert to issue {issue_id}: {str(e)}")
+                logging.error(f"Falling back to creating new Issue")
+        except Exception as e:
+            logging.error(f"Error finding issue {issue_id}: {str(e)}")
+            logging.error(f"Falling back to creating new Issue")
     
     # Если нет подходящего Issue, создаем новый
-    return create_new_issue_for_alert(alert) 
+    try:
+        result = create_new_issue_for_alert(alert)
+        return result
+    except Exception as e:
+        logging.error(f"Error creating new issue for alert {alert.id}: {str(e)}")
+        # Возвращаем исходный алерт, если не удалось создать Issue
+        return alert
 
 def create_new_issue_for_alert(alert):
-    logging.debug(f"Создаем новый Issue для алерта {alert}")
     """
-    Создает новый Issue для алерта
+    Создает новый Issue для алерта и связывает алерт с этим Issue
     
     :param alert: Алерт, для которого создается Issue
     :return: Алерт, привязанный к новому Issue
     """
+    logging.debug(f"Creating new Issue for alert {alert.id}")
+    
     # Извлекаем данные из алерта
     event = alert.event
     resource = alert.resource
-    project_groups = [tag.split(':')[1] for tag in alert.tags if tag.startswith('ProjectGroup:')]
-    info_systems = [tag.split(':')[1] for tag in alert.tags if tag.startswith('InfoSystem:')]
+    
+    # Извлекаем теги проектных групп и информационных систем
+    project_groups = []
+    info_systems = []
+    
+    for tag in alert.tags:
+        if ':' in tag:
+            key, value = tag.split(':', 1)
+            if key == 'ProjectGroup':
+                project_groups.append(value)
+                logging.debug(f"Extracted ProjectGroup tag: {value}")
+            elif key == 'InfoSystem':
+                info_systems.append(value)
+                logging.debug(f"Extracted InfoSystem tag: {value}")
     
     # Формируем summary - если есть text, используем его, иначе формируем из event и resource
     summary = alert.text if alert.text else f"Issue for {event} on {resource}"
@@ -461,61 +641,12 @@ def create_new_issue_for_alert(alert):
         info_systems=info_systems
     )
     
-    logging.debug(f"Issue {issue}")
     # Сохраняем Issue
     issue = issue.create()
+    logging.info(f"Created new Issue {issue.id} for alert {alert.id}")
     
     # Привязываем алерт к Issue
     alert = alert.link_to_issue(issue.id)
+    logging.info(f"Linked alert {alert.id} to Issue {issue.id}")
     
-    return alert 
-
-def create_test_issues():
-    """
-    Создает несколько тестовых Issue для проверки функциональности
-    
-    :return: Список созданных Issue
-    """
-    test_issues = []
-    
-    # Создаем Issue с одним значением в hosts
-    issue1 = Issue(
-        summary="Test Issue 1 for node_down",
-        severity="major",
-        status="open",
-        alerts=[],
-        hosts=["node_down"],
-        project_groups=["TestGroup"],
-        info_systems=["TestSystem"]
-    )
-    issue1 = issue1.create()
-    test_issues.append(issue1)
-    
-    # Создаем Issue с одним значением в project_groups
-    issue2 = Issue(
-        summary="Test Issue 2 for ProjectGroup",
-        severity="minor",
-        status="open",
-        alerts=[],
-        hosts=["node_up", "node_down"],  # несколько значений
-        project_groups=["ImportantGroup"],  # одно значение
-        info_systems=["TestSystem1", "TestSystem2"]
-    )
-    issue2 = issue2.create()
-    test_issues.append(issue2)
-    
-    # Создаем Issue с одним значением в info_systems
-    issue3 = Issue(
-        summary="Test Issue 3 for InfoSystem",
-        severity="critical",
-        status="open",
-        alerts=[],
-        hosts=["node_error", "node_warning"],
-        project_groups=["Group1", "Group2"],
-        info_systems=["CriticalSystem"]  # одно значение
-    )
-    issue3 = issue3.create()
-    test_issues.append(issue3)
-    
-    logging.info(f"Created {len(test_issues)} test issues")
-    return test_issues 
+    return alert

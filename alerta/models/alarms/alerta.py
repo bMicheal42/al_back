@@ -315,7 +315,8 @@ class StateMachine(AlarmModel):
             if StateMachine.Severity[current_severity] != StateMachine.NORMAL_SEVERITY_LEVEL:
                 return next_state('EXP-1', current_severity, Status.Open)
 
-        logging.error(f'No action found for state: {state}, action: {action}, alert_id: {alert.id} ')
+        if state != Status.Open and action:
+            logging.error(f'No action found for state: {state}, action: {action}, alert_id: {alert.id} ')
         return next_state('ALL-*', current_severity, current_status)
 
     @staticmethod
