@@ -240,29 +240,6 @@ class Issue:
             return self
 
 
-
-    # remove alert from issue
-    def remove_alert(self, alert_id: str) -> 'Issue':
-        """
-        Удаляет алерт из Issue и обновляет списки уникальных значений полей
-        
-        :param alert_id: ID алерта, который нужно удалить
-        :return: Обновленный Issue
-        """
-        return self.mass_remove_alerts_sql([alert_id])
-        
-    # массовое удаление алертов из issue
-    def mass_remove_alerts(self, alert_ids: List[str]) -> 'Issue':
-        """
-        Массовое удаление алертов из Issue и обновление списков уникальных значений полей
-        
-        :param alert_ids: Список ID алертов, которые нужно удалить
-        :return: Обновленный Issue
-        
-        @deprecated Используйте mass_remove_alerts_sql вместо этого метода
-        """
-        return self.mass_remove_alerts_sql(alert_ids)
-
     # resolve an issue
     def resolve(self, text: str = '') -> 'Issue':
         now = datetime.utcnow()
@@ -289,7 +266,7 @@ class Issue:
         return db.delete_issue(issue_id)
 
     # массовое удаление алертов из issue с использованием SQL-агрегации
-    def mass_remove_alerts_sql(self, alert_ids: List[str]) -> 'Issue':
+    def mass_remove_alerts(self, alert_ids: List[str]) -> 'Issue':
         """
         Массовое удаление алертов из Issue с использованием SQL-агрегации
         для обновления атрибутов.
@@ -301,7 +278,7 @@ class Issue:
             logging.debug(f"Список алертов для удаления пуст")
             return self
         
-        # Фильтруем только те ID, которые действительно есть в Issue
+        # TODO оптимизировать
         alert_ids_to_remove = [a_id for a_id in alert_ids if a_id in self.alerts]
         
         if not alert_ids_to_remove:
@@ -334,7 +311,7 @@ class Issue:
             
             # В случае закрытия issue, мы отвязываем все алерты
             from alerta.models.alert import Alert
-            Alert.mass_unlink_from_issue(alert_ids_to_remove, self.id)
+            Alert.mass_unlink_from_issue(alert_ids_to_remove, self)
             
             return updated_issue
         else:
@@ -347,7 +324,7 @@ class Issue:
             
             # Используем оптимизированный метод для массового отлинкования алертов от issue
             from alerta.models.alert import Alert
-            Alert.mass_unlink_from_issue(alert_ids_to_remove, self.id)
+            Alert.mass_unlink_from_issue(alert_ids_to_remove, self)
             
             # Обновляем атрибуты Issue с помощью SQL-агрегации
             updated_issue = updated_issue.update_with_sql_aggregation()
@@ -367,22 +344,29 @@ class Issue:
             return self
         
         # Получаем обновленные атрибуты с помощью SQL
-        updated_attrs = recalculate_issue_attributes_sql(self.id)
-        
-        # Если обновления отсутствуют, возвращаем текущий Issue
-        if not updated_attrs:
-            logging.debug(f"Нет обновлений для Issue {self.id}")
+        try:
+            updated_attrs = recalculate_issue_attributes_sql(self.id)
+            
+            # Если обновления отсутствуют, возвращаем текущий Issue
+            if not updated_attrs:
+                logging.debug(f"Нет обновлений для Issue {self.id}")
+                return self
+            
+            # Обновляем Issue
+            return self.update(
+                **updated_attrs,
+                change_type='attributes-recalculated',
+                text='Issue attributes recalculated with SQL aggregation'
+            )
+        except Exception as e:
+            logging.error(f"Ошибка при обновлении атрибутов Issue {self.id} с помощью SQL: {str(e)}")
+            import traceback
+            logging.error(traceback.format_exc())
+            # Возвращаем текущий объект без изменений в случае ошибки
             return self
-        
-        # Обновляем Issue
-        return self.update(
-            **updated_attrs,
-            change_type='attributes-recalculated',
-            text='Issue attributes recalculated with SQL aggregation'
-        )
 
     def mass_add_alerts(self, alerts: List) -> 'Issue':
-        """
+        """ #TODO оптимизировать на alerts_ids
         Оптимизированное массовое добавление алертов к Issue 
         с использованием SQL для проверки уникальности.
         
@@ -442,9 +426,12 @@ class Issue:
             text=f'Added {new_alerts_count} alerts to issue'
         )
         
-        # Используем оптимизированный метод для массового линкования алертов к issue
+        # Получаем список объектов Alert для передачи в метод mass_link_to_issue
         from alerta.models.alert import Alert
-        Alert.mass_link_to_issue(new_alert_ids, self.id)
+        new_alerts = [alert for alert in alerts if alert.id in new_alert_ids]
+        
+        # Используем оптимизированный метод для массового линкования алертов к issue
+        Alert.mass_link_to_issue(new_alerts, self.id)
         
         # Обновляем атрибуты Issue с помощью SQL-агрегации
         updated_issue = updated_issue.update_with_sql_aggregation()
@@ -551,7 +538,7 @@ def process_new_alert(alert):
     :return: Алерт после обработки
     """
     logging.debug(f"Processing new alert {alert.id} (event={alert.event})")
-    
+
     # Проверка на сопоставление с существующими паттернами
     pattern_matches = None
     try:
@@ -584,14 +571,13 @@ def process_new_alert(alert):
         try:
             # Получаем Issue и добавляем к нему алерт
             issue = Issue.find_by_id(issue_id)
-            logging.warning(f"ISSUESSSS: {[issue]}")
+            logging.warning(f"Issue for linking Found: {issue.id}")
             
             try:
-                # Добавляем алерт к Issue, передавая весь объект алерта
-                issue = issue.add_alert(alert)
-                
+                # Передаем объекты Alert в виде списка в метод mass_add_alerts
+                issue = issue.mass_add_alerts([alert])
                 # Связываем алерт с Issue
-                alert = alert.link_to_issue(issue_id)
+                alert = alert.link_to_issue(issue)
                 
                 logging.info(f"Added alert {alert.id} to existing issue {issue_id}")
                 return alert
@@ -679,7 +665,7 @@ def create_new_issue_for_alert(alert):
     logging.info(f"Created new Issue {issue.id} for alert {alert.id}")
     
     # Привязываем алерт к Issue
-    alert = alert.link_to_issue(issue.id)
+    alert = alert.link_to_issue(issue)
     logging.info(f"Linked alert {alert.id} to Issue {issue.id}")
     
     return alert
@@ -697,21 +683,37 @@ def recalculate_issue_attributes_sql(issue_id: str) -> Dict[str, Any]:
     
     logging.debug(f"Пересчет атрибутов для Issue {issue_id} с использованием SQL-агрегации")
     
-    # Получаем все агрегированные атрибуты за один вызов
-    agg_attrs = db.get_issue_aggregated_attributes(issue_id)
-    
-    # Формируем словарь с обновленными атрибутами
-    updated_attrs = {
-        'severity': agg_attrs['severity'],
-        'host_critical': '1' if agg_attrs['host_critical'] else '0',
-        'hosts': agg_attrs['hosts'],
-        'project_groups': agg_attrs['project_groups'],
-        'info_systems': agg_attrs['info_systems']
-    }
-    
-    # Добавляем last_alert_time, если оно есть
-    if agg_attrs['last_alert_time']:
-        updated_attrs['last_alert_time'] = agg_attrs['last_alert_time']
-    
-    logging.debug(f"Результат SQL-агрегации для Issue {issue_id}: {updated_attrs}")
-    return updated_attrs
+    try:
+        # Получаем все агрегированные атрибуты за один вызов
+        agg_attrs = db.get_issue_aggregated_attributes(issue_id)
+        
+        # Формируем словарь с обновленными атрибутами
+        updated_attrs = {
+            'severity': agg_attrs['severity'],
+            'host_critical': '1' if agg_attrs['host_critical'] else '0',
+            'hosts': agg_attrs['hosts'],
+            'project_groups': agg_attrs['project_groups'],
+            'info_systems': agg_attrs['info_systems']
+        }
+        
+        # Добавляем last_alert_time, если оно есть
+        if agg_attrs['last_alert_time']:
+            updated_attrs['last_alert_time'] = agg_attrs['last_alert_time']
+        
+        logging.debug(f"Результат SQL-агрегации для Issue {issue_id}: {updated_attrs}")
+        return updated_attrs
+    except Exception as e:
+        logging.error(f"Ошибка при выполнении SQL-агрегации для Issue {issue_id}: {str(e)}")
+        import traceback
+        logging.error(traceback.format_exc())
+        
+        # Возвращаем значения по умолчанию
+        default_attrs = {
+            'severity': 'medium',
+            'host_critical': '0',
+            'hosts': [],
+            'project_groups': [],
+            'info_systems': []
+        }
+        logging.warning(f"Используем значения по умолчанию для Issue {issue_id} из-за ошибки в SQL-агрегации")
+        return default_attrs

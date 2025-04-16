@@ -7,6 +7,7 @@ from typing import List, Dict, Any
 import json
 import re
 from copy import deepcopy
+from uuid import uuid4
 
 import psycopg2
 from flask import current_app
@@ -2247,17 +2248,48 @@ class Backend(Database):
         cursor.execute(query, vars)
         return cursor.fetchone()
 
-    def _fetchall(self, query, vars, limit=None, offset=0):
+    def _fetchall(self, query, vars=None, limit=None, offset=None):
         """
-        Return multiple rows.
+        Выполняет SELECT запрос и возвращает все результаты.
+        
+        :param query: SQL запрос
+        :param vars: Параметры для запроса
+        :param limit: Ограничение количества результатов
+        :param offset: Смещение результатов
+        :return: Список результатов
         """
-        if limit is None:
-            limit = current_app.config['DEFAULT_PAGE_SIZE']
-        query += f' LIMIT {limit} OFFSET {offset}'
-        cursor = self.get_db().cursor()
-        self._log(cursor, query, vars)
-        cursor.execute(query, vars)
-        return cursor.fetchall()
+        connection = self.get_db()
+        cursor = connection.cursor()
+        
+        # Проверка, содержит ли запрос уже LIMIT или OFFSET
+        has_limit = re.search(r'\bLIMIT\b', query, re.IGNORECASE)
+        has_offset = re.search(r'\bOFFSET\b', query, re.IGNORECASE)
+        
+        # Если запрос уже содержит LIMIT или OFFSET, используем его как есть
+        if has_limit or has_offset:
+            modified_query = query
+        else:
+            # Иначе добавляем LIMIT и OFFSET к запросу, если они предоставлены
+            modified_query = query
+            if limit is not None:
+                modified_query += f" LIMIT {limit}"
+            if offset is not None:
+                modified_query += f" OFFSET {offset}"
+        
+        try:
+            # Добавляем отладочное логирование
+            import logging
+            logging.debug(f"Executing SQL: {modified_query}")
+            logging.debug(f"With parameters: {vars}")
+            
+            cursor.execute(modified_query, vars)
+            return cursor.fetchall()
+        except Exception as e:
+            logging.error(f"SQL Error: {str(e)}")
+            logging.error(f"Query: {modified_query}")
+            logging.error(f"Parameters: {vars}")
+            self.get_db().rollback()
+            raise e
 
     def _updateone(self, query, vars, returning=False):
         """
@@ -2441,23 +2473,60 @@ class Backend(Database):
     def update_alert_issue_id(self, alert_id, issue_id, history=None):
         import logging
         
-        logging.warning(f"Обновление issue_id для алерта {alert_id} на {issue_id}")
-        
         update = """
             UPDATE alerts
             SET issue_id = %s
+            WHERE id = %s RETURNING *
         """
-        if history:
-            update += ", history=array_append(history, %s::history)"
-            
-        update += " WHERE id = %s RETURNING *"
         
-        if history:
-            # History уже зарегистрирован через HistoryAdapter
-            # и будет автоматически преобразован при вставке
-            return self._updateone(update, (issue_id, history, alert_id), returning=True)
-        else:
-            return self._updateone(update, (issue_id, alert_id), returning=True)
+        logging.info(f"Обновление issue_id алерта {alert_id} на {issue_id}")
+        return self._updateone(update, (issue_id, alert_id), returning=True)
+
+    def mass_update_issue_id(self, alerts, issue_id):
+        """
+        Обновление issue_id для списка алертов, используя один SQL-запрос
+        Массовое связывание или отвязывание алертов от задачи
+
+        :param alerts: Список объектов Alert для обновления
+        :param issue_id: ID задачи (может быть None для отвязки)
+        :return: Список обновленных алертов
+        """
+        if not alerts:
+            return []
+            
+        # Извлекаем ID алертов из объектов Alert
+        alert_ids = [a.id for a in alerts]
+
+        # Простое обновление без добавления истории
+        update_sql = """
+        UPDATE alerts 
+        SET issue_id = %s 
+        WHERE id IN %s
+        RETURNING *
+        """
+        
+        # Проверяем, что alert_ids не пустой
+        if not alert_ids:
+            import logging
+            logging.warning("Попытка обновить issue_id для пустого списка алертов")
+            return []
+
+        try:
+            # Выполняем запрос на обновление
+            updated = list(self._fetchall(update_sql, (issue_id, tuple(alert_ids))))
+            
+            # Логирование
+            import logging
+            action = "привязки к" if issue_id else "отвязки от"
+            logging.info(f"Выполнено массовое обновление {action} задачи {issue_id} для {len(updated)} алертов")
+            
+            return updated
+        except Exception as e:
+            import logging
+            logging.error(f"Ошибка при массовом обновлении issue_id: {str(e)}")
+            import traceback
+            logging.error(traceback.format_exc())
+            raise
 
     def get_issue_max_severity(self, issue_id):
         """
@@ -2589,89 +2658,119 @@ class Backend(Database):
         :param issue_id: ID проблемы
         :return: Словарь с агрегированными атрибутами
         """
-        # Используем CTE (Common Table Expression) для получения базового набора алертов
-        sql = """
-        WITH issue_alerts AS (
-            SELECT *
-            FROM alerts
-            WHERE issue_id = %s AND status != 'expired'
-        ),
-        -- Вычисляем максимальное severity
-        max_severity AS (
+        try:
+            # Используем CTE (Common Table Expression) для получения базового набора алертов
+            sql = """
+            WITH issue_alerts AS (
+                SELECT *
+                FROM alerts
+                WHERE issue_id = %s AND status != 'expired'
+            ),
+            -- Вычисляем максимальное severity
+            max_severity AS (
+                SELECT 
+                    CASE 
+                        WHEN MAX(CASE
+                            WHEN severity = 'critical' THEN 5
+                            WHEN severity = 'high' THEN 4
+                            WHEN severity = 'medium' THEN 3
+                            ELSE 1
+                        END) = 5 THEN 'critical'
+                        WHEN MAX(CASE
+                            WHEN severity = 'critical' THEN 5
+                            WHEN severity = 'high' THEN 4
+                            WHEN severity = 'medium' THEN 3
+                            ELSE 1
+                        END) = 4 THEN 'high'
+                        WHEN MAX(CASE
+                            WHEN severity = 'critical' THEN 5
+                            WHEN severity = 'high' THEN 4
+                            WHEN severity = 'medium' THEN 3
+                            ELSE 1
+                        END) = 3 THEN 'medium'
+                        ELSE 'normal'
+                    END AS severity
+                FROM issue_alerts
+            ),
+            -- Проверяем наличие критичных хостов
+            host_critical AS (
+                SELECT 
+                    CASE 
+                        WHEN COUNT(*) > 0 THEN TRUE 
+                        ELSE FALSE 
+                    END AS is_critical
+                FROM issue_alerts
+                WHERE attributes->>'host_critical' = '1'
+            ),
+            -- Собираем уникальные events (хосты)
+            unique_hosts AS (
+                SELECT array_agg(DISTINCT event ORDER BY event) AS hosts
+                FROM issue_alerts
+            ),
+            -- Собираем уникальные project_groups
+            project_groups AS (
+                SELECT array_agg(DISTINCT substring(t.tag_value FROM 14)) AS project_groups
+                FROM issue_alerts a, 
+                    LATERAL unnest(a.tags) t(tag_value)
+                WHERE t.tag_value LIKE 'ProjectGroup:%%'
+            ),
+            -- Собираем уникальные info_systems
+            info_systems AS (
+                SELECT array_agg(DISTINCT substring(t.tag_value FROM 12)) AS info_systems
+                FROM issue_alerts a, 
+                    LATERAL unnest(a.tags) t(tag_value)
+                WHERE t.tag_value LIKE 'InfoSystem:%%'
+            ),
+            -- Получаем last_alert_time
+            last_alert_time AS (
+                SELECT MAX(create_time) AS last_time
+                FROM issue_alerts
+            )
+            
+            -- Собираем все вычисленные данные
             SELECT 
-                CASE 
-                    WHEN MAX(CASE
-                        WHEN severity = 'critical' THEN 5
-                        WHEN severity = 'high' THEN 4
-                        WHEN severity = 'medium' THEN 3
-                        ELSE 1
-                    END) = 5 THEN 'critical'
-                    WHEN MAX(CASE
-                        WHEN severity = 'critical' THEN 5
-                        WHEN severity = 'high' THEN 4
-                        WHEN severity = 'medium' THEN 3
-                        ELSE 1
-                    END) = 4 THEN 'high'
-                    WHEN MAX(CASE
-                        WHEN severity = 'critical' THEN 5
-                        WHEN severity = 'high' THEN 4
-                        WHEN severity = 'medium' THEN 3
-                        ELSE 1
-                    END) = 3 THEN 'medium'
-                    ELSE 'normal'
-                END AS severity
-            FROM issue_alerts
-        ),
-        -- Проверяем наличие критичных хостов
-        host_critical AS (
-            SELECT 
-                CASE 
-                    WHEN COUNT(*) > 0 THEN TRUE 
-                    ELSE FALSE 
-                END AS is_critical
-            FROM issue_alerts
-            WHERE attributes->>'host_critical' = '1'
-        ),
-        -- Собираем уникальные events (хосты)
-        unique_hosts AS (
-            SELECT array_agg(DISTINCT event ORDER BY event) AS hosts
-            FROM issue_alerts
-        ),
-        -- Собираем уникальные project_groups
-        project_groups AS (
-            SELECT array_agg(DISTINCT substring(t.tag_value FROM 15)) AS project_groups
-            FROM issue_alerts a, 
-                LATERAL unnest(a.tags) t(tag_value)
-            WHERE t.tag_value LIKE 'project_group.%'
-        ),
-        -- Собираем уникальные info_systems
-        info_systems AS (
-            SELECT array_agg(DISTINCT substring(t.tag_value FROM 12)) AS info_systems
-            FROM issue_alerts a, 
-                LATERAL unnest(a.tags) t(tag_value)
-            WHERE t.tag_value LIKE 'info_system.%'
-        ),
-        -- Получаем last_alert_time
-        last_alert_time AS (
-            SELECT MAX(create_time) AS last_time
-            FROM issue_alerts
-        )
-        
-        -- Собираем все вычисленные данные
-        SELECT 
-            (SELECT severity FROM max_severity) AS severity,
-            (SELECT is_critical FROM host_critical) AS host_critical,
-            (SELECT hosts FROM unique_hosts) AS hosts,
-            (SELECT project_groups FROM project_groups) AS project_groups,
-            (SELECT info_systems FROM info_systems) AS info_systems,
-            (SELECT last_time FROM last_alert_time) AS last_alert_time
-        """
-        cursor = self.get_db().cursor()
-        cursor.execute(sql, (issue_id,))
-        result = cursor.fetchone()
-        cursor.close()
-        
-        if not result:
+                (SELECT severity FROM max_severity) AS severity,
+                (SELECT is_critical FROM host_critical) AS host_critical,
+                (SELECT hosts FROM unique_hosts) AS hosts,
+                (SELECT project_groups FROM project_groups) AS project_groups,
+                (SELECT info_systems FROM info_systems) AS info_systems,
+                (SELECT last_time FROM last_alert_time) AS last_alert_time
+            """
+            cursor = self.get_db().cursor()
+            
+            # Правильно форматируем параметр для запроса
+            params = (issue_id,)
+            cursor.execute(sql, params)
+            
+            result = cursor.fetchone()
+            cursor.close()
+            
+            if not result:
+                return {
+                    'severity': 'normal',
+                    'host_critical': False,
+                    'hosts': [],
+                    'project_groups': [],
+                    'info_systems': [],
+                    'last_alert_time': None
+                }
+            
+            # Сформируем словарь с результатами
+            keys = ['severity', 'host_critical', 'hosts', 'project_groups', 'info_systems', 'last_alert_time']
+            result_dict = {k: v for k, v in zip(keys, result)}
+            
+            # Преобразуем пустые массивы из None в пустой список
+            for array_key in ['hosts', 'project_groups', 'info_systems']:
+                if result_dict[array_key] is None:
+                    result_dict[array_key] = []
+            
+            return result_dict
+        except Exception as e:
+            import logging
+            import traceback
+            logging.error(f"Ошибка при получении агрегированных атрибутов для issue {issue_id}: {str(e)}")
+            logging.error(traceback.format_exc())
+            # Возвращаем значения по умолчанию
             return {
                 'severity': 'normal',
                 'host_critical': False,
@@ -2680,14 +2779,3 @@ class Backend(Database):
                 'info_systems': [],
                 'last_alert_time': None
             }
-        
-        # Сформируем словарь с результатами
-        keys = ['severity', 'host_critical', 'hosts', 'project_groups', 'info_systems', 'last_alert_time']
-        result_dict = {k: v for k, v in zip(keys, result)}
-        
-        # Преобразуем пустые массивы из None в пустой список
-        for array_key in ['hosts', 'project_groups', 'info_systems']:
-            if result_dict[array_key] is None:
-                result_dict[array_key] = []
-        
-        return result_dict

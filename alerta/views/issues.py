@@ -192,7 +192,7 @@ def get_issue_alerts(issue_id):
 @permission('write:issues')
 @jsonp
 def add_alert_to_issue(issue_id, alert_id):
-    issue = Issue.find_by_id(issue_id)
+    issue = Issue.find_by_id(issue_id) #TODO оптимизировать
     if not issue:
         raise ApiError('Issue not found', 404)
         
@@ -205,8 +205,8 @@ def add_alert_to_issue(issue_id, alert_id):
         raise ApiError('Alert already assigned to another issue', 409)
         
     try:
-        alert = alert.link_to_issue(issue_id)
-        issue = issue.mass_add_alerts(alert_id)
+        alert = alert.link_to_issue(issue)
+        issue = issue.mass_add_alerts([alert])
     except Exception as e:
         raise ApiError(str(e), 500)
         
@@ -261,7 +261,7 @@ def delete_issue(issue_id):
         raise ApiError('Issue not found', 404)
         
     # Unlink all alerts from this issue
-    for alert_id in issue.alerts:
+    for alert_id in issue.alerts: #TODO оптимизировать
         try:
             alert = Alert.find_by_id(alert_id)
             if alert and alert.issue_id == issue_id:

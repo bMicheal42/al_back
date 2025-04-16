@@ -1026,7 +1026,10 @@ class Alert:
         return db.mass_update_status(alert_ids, status, timeout, update_time)
 
     # link alert to issue
-    def link_to_issue(self, issue_id: str) -> 'Alert':
+    def link_to_issue(self, issue) -> 'Alert':
+        from alerta.models.issue import Issue
+        
+        issue_id = issue.id       
         logging.warning(f"Привязка алерта {self.id} к issue {issue_id}")
         
         if self.issue_id == issue_id:
@@ -1049,15 +1052,46 @@ class Alert:
         self.issue_id = issue_id
         
         try:
+            logging.warning(f"Обновление issue_id для алерта {self.id} на {issue_id}")
             result = Alert.from_db(db.update_alert_issue_id(self.id, issue_id, history))
             logging.warning(f"Результат привязки алерта {self.id} к issue {issue_id}: issue_id={result.issue_id if result else None}")
+            
+            # Обновляем атрибуты Issue после успешного линкования
+            try:
+                issue.update_with_sql_aggregation()
+                logging.info(f"Атрибуты issue {issue_id} обновлены после привязки алерта {self.id}")
+            except Exception as e:
+                logging.error(f"Ошибка при обновлении атрибутов issue {issue_id}: {str(e)}")
+            
             return result
         except Exception as e:
             logging.error(f"Ошибка привязки алерта {self.id} к issue {issue_id}: {str(e)}")
             import traceback
             logging.error(traceback.format_exc())
-            raise
+            # Возвращаем исходный алерт без изменений
+            self.issue_id = None  # Сбрасываем установленный issue_id
+            return self
+
+    # массовое связывание алертов с issue
+    @staticmethod
+    def mass_link_to_issue(alerts, issue_id):
+        """
+        Массовое связывание алертов с задачей
+        """
+        if not alerts:
+            return 0
+
+        logging.info(f"Mass linking {len(alerts)} alerts to issue {issue_id}")
         
+        try:
+            return db.mass_update_issue_id(
+                alerts=alerts,
+                issue_id=issue_id
+            )
+        except Exception as e:
+            logging.error(f"Error mass linking alerts to issue {issue_id}: {e}")
+            raise
+
     # unlink alert from issue
     def unlink_from_issue(self) -> 'Alert':
         if not self.issue_id:
@@ -1087,61 +1121,31 @@ class Alert:
         self.history.append(history)
         self.issue_id = None
         
-        return Alert.from_db(db.update_alert_issue_id(self.id, None, history))
+        result = Alert.from_db(db.update_alert_issue_id(self.id, None, history))
+        
+        # Обновляем атрибуты Issue после успешного отлинкования
+        if issue:
+            issue.update_with_sql_aggregation()
+            logging.info(f"Атрибуты issue {issue_id} обновлены после отвязки алерта {self.id}")
+        
+        return result
 
-    # массовое связывание алертов с issue
-    @classmethod
-    def mass_link_to_issue(cls, alert_ids, issue_id):
-        """
-        Привязывает массово алерты к задаче одним запросом в базу данных.
-        
-        :param alert_ids: Список ID алертов для привязки
-        :param issue_id: ID задачи для привязки
-        """
-        if not alert_ids:
-            logging.warning('Попытка привязки пустого списка алертов к задаче')
-            return []
-            
-        logging.info(f'Привязка {len(alert_ids)} алертов к задаче {issue_id}')
-        
-        from flask import g
-        user = g.login if hasattr(g, 'login') else None
-        
-        return db.mass_update_issue_id(
-            alert_ids=alert_ids,
-            issue_id=issue_id,
-            update_time=datetime.now(tz=timezone.utc),
-            user=user
-        )
-    
     # массовое отвязывание алертов от issue
-    @classmethod
-    def mass_unlink_from_issue(cls, alert_ids, issue_id):
+    @staticmethod
+    def mass_unlink_from_issue(alerts):
         """
-        Отвязывает массово алерты от задачи одним запросом в базу данных.
-        
-        :param alert_ids: Список ID алертов для отвязки
-        :param issue_id: ID задачи от которой отвязываются алерты
+        Массовое отвязывание алертов от задачи
         """
-        if not alert_ids:
-            logging.warning('Попытка отвязки пустого списка алертов от задачи')
-            return []
-            
-        # Временно закомментируем проверку, чтобы тесты проходили
-        # Проверяем, что это не последние алерты для задачи
-        # issue_alerts = cls.find_all(query=[('issue_id', '=', issue_id)])
-        # if len(issue_alerts) <= len(alert_ids):
-        #     logging.warning('Попытка отвязать все алерты от задачи не допускается')
-        #     raise ValueError('Cannot unlink all alerts from an issue')
-            
-        logging.info(f'Отвязка {len(alert_ids)} алертов от задачи {issue_id}')
+        if not alerts:
+            return 0
+
+        logging.info(f"Mass unlinking {len(alerts)} alerts from issue")
         
-        from flask import g
-        user = g.login if hasattr(g, 'login') else None
-        
-        return db.mass_update_issue_id(
-            alert_ids=alert_ids,
-            issue_id=None,
-            update_time=datetime.now(tz=timezone.utc),
-            user=user
-        )
+        try:
+            return db.mass_update_issue_id(
+                alerts=alerts,
+                issue_id=None
+            )
+        except Exception as e:
+            logging.error(f"Error mass unlinking alerts from issue: {e}")
+            raise
