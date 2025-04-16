@@ -237,6 +237,9 @@ def remove_alert_from_issue(issue_id, alert_id):
     try:
         alert = alert.unlink_from_issue()
         issue = issue.remove_alert(alert_id)
+    except ValueError as e:
+        # Перехватываем ошибку о невозможности удаления последнего алерта
+        raise ApiError(str(e), 400)
     except Exception as e:
         raise ApiError(str(e), 500)
         

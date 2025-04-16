@@ -570,9 +570,24 @@ class Alert:
         return self.create(), True
 
     # retrieve an alert
-    @staticmethod
-    def find_by_id(id: str, customers: List[str] = None) -> 'Alert':
-        return Alert.from_db(db.get_alert(id, customers))
+    @classmethod
+    def find_by_id(cls, id: str, customers: List[str] = None) -> 'Alert':
+        return cls.from_db(db.get_alert(id, customers))
+
+    @classmethod
+    def find_by_ids(cls, ids: List[str], customers: List[str] = None) -> List['Alert']:
+        """
+        Находит множество алертов по списку их ID.
+        Намного эффективнее, чем вызывать find_by_id для каждого ID отдельно.
+        
+        :param ids: Список ID алертов
+        :param customers: Опциональный список клиентов для фильтрации
+        :return: Список объектов Alert
+        """
+        if not ids:
+            return []
+            
+        return [cls.from_db(alert) for alert in db.find_by_ids(ids, customers=customers)]
 
     def get_parent(self) -> 'Alert':
         if self.attributes.incident:
@@ -769,19 +784,6 @@ class Alert:
     @staticmethod
     def find_all_really(query: Query = None) -> List['Alert']:
         return [Alert.from_db(alert) for alert in db.get_allAlerts(query)]
-
-    @staticmethod
-    def find_by_ids(ids: List[str]) -> List['Alert']:
-        """
-        Find alerts by a list of alert IDs.
-
-        :param ids: List of alert IDs
-        :return: List of alerts
-        """
-        if not ids:
-            return []
-
-        return [Alert.from_db(alert) for alert in db.find_by_ids(ids)]
 
     @staticmethod
     def find_by_jira_keys(ids: List[str]) -> List['Alert']:
@@ -1062,6 +1064,14 @@ class Alert:
             return self
             
         issue_id = self.issue_id
+        
+        # Проверка, является ли алерт последним для данного issue
+        from alerta.models.issue import Issue
+        issue = Issue.find_by_id(issue_id)
+        if issue and len(issue.alerts) <= 1 and issue.alerts[0] == self.id:
+            logging.warning(f"Невозможно отвязать последний алерт {self.id} от issue {issue_id}")
+            raise ValueError(f"Невозможно отвязать последний алерт от issue {issue_id}. Сначала добавьте другие алерты или закройте issue.")
+            
         history = History(
             id=self.id,
             event=self.event,
