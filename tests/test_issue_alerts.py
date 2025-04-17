@@ -7,7 +7,7 @@ import time
 
 from flask import Flask, g
 
-from alerta.models.issue import Issue, create_new_issue_for_alert, recalculate_issue_attributes_sql
+from alerta.models.issue import Issue, create_new_issue_for_alert, recalculate_issue_attributes
 from alerta.models.alert import Alert
 
 
@@ -401,7 +401,7 @@ class TestIssueAlerts(unittest.TestCase):
             self.assertEqual(len(updated_issue.info_systems), 0)  # Не должно быть информационных систем
 
     @patch('alerta.models.issue.db')
-    @patch('alerta.models.alert.Alert.mass_link_to_issue')
+    @patch('alerta.models.alert.Alert.link_alerts_to_issue')
     def test_mass_add_large_number_of_alerts(self, mock_mass_link, mock_db):
         """Тест массового добавления большого числа алертов (500) и корректного пересчета атрибутов issue"""
         
@@ -534,7 +534,7 @@ class TestIssueAlerts(unittest.TestCase):
             mock_mass_link.assert_called_once_with(filtered_alert_ids, "issue-mass-test")
     
     @patch('alerta.models.issue.db')
-    @patch('alerta.models.alert.Alert.mass_link_to_issue')
+    @patch('alerta.models.alert.Alert.link_alerts_to_issue')
     def test_sql_optimized_alert_addition(self, mock_mass_link, mock_db):
         """Тест SQL-оптимизированного метода добавления алертов с проверкой фильтрации дубликатов"""
         
@@ -655,7 +655,7 @@ class TestIssueAlerts(unittest.TestCase):
             # 2. Для обновления атрибутов через SQL-агрегацию
             self.assertEqual(mock_update.call_count, 2)
             
-            # Проверяем, что mass_link_to_issue вызван только с новыми уникальными алертами
+            # Проверяем, что link_alerts_to_issue вызван только с новыми уникальными алертами
             mock_mass_link.assert_called_once_with(new_alert_ids, "issue-sql-test")
             
             # Проверяем, что был вызван метод для получения агрегированных атрибутов
@@ -748,7 +748,7 @@ class TestIssueAlerts(unittest.TestCase):
         
         # Запускаем тесты производительности
         with patch('alerta.models.issue.db'), \
-             patch('alerta.models.alert.Alert.mass_link_to_issue'), \
+             patch('alerta.models.alert.Alert.link_alerts_to_issue'), \
              patch.object(issue, 'update', return_value=issue):
             
             # Запускаем неоптимизированную версию
@@ -768,7 +768,7 @@ class TestIssueAlerts(unittest.TestCase):
 
     @patch('alerta.app.db')
     def test_recalculate_issue_attributes(self, mock_db):
-        """Тест функции recalculate_issue_attributes_sql для пересчета атрибутов Issue на основе связанных алертов."""
+        """Тест функции recalculate_issue_attributes для пересчета атрибутов Issue на основе связанных алертов."""
         
         # Создаем имитационные данные для теста
         now = datetime.now()
@@ -788,7 +788,7 @@ class TestIssueAlerts(unittest.TestCase):
         
         # Вызываем тестируемую функцию
         issue_id = 'test-issue-123'
-        updated_attrs = recalculate_issue_attributes_sql(issue_id)
+        updated_attrs = recalculate_issue_attributes(issue_id)
         
         # Проверяем, что метод был вызван с правильным аргументом
         mock_db.get_issue_aggregated_attributes.assert_called_once_with(issue_id)
@@ -816,7 +816,7 @@ class TestIssueAlerts(unittest.TestCase):
         mock_db.get_issue_aggregated_attributes.return_value = mock_result_data_no_time
         
         # Вызываем функцию пересчета атрибутов снова
-        updated_attrs = recalculate_issue_attributes_sql(issue_id)
+        updated_attrs = recalculate_issue_attributes(issue_id)
         
         # Проверяем, что метод был вызван снова
         mock_db.get_issue_aggregated_attributes.assert_called_once_with(issue_id)

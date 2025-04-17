@@ -25,7 +25,7 @@
 
 Новые тесты:
 
-8. **test_recalculate_issue_attributes**: Проверяет работу функции recalculate_issue_attributes_sql для пересчета атрибутов Issue (severity, host_critical, hosts, project_groups, info_systems, last_alert_time) на основе связанных алертов с использованием SQL-агрегации.
+8. **test_recalculate_issue_attributes**: Проверяет работу функции recalculate_issue_attributes для пересчета атрибутов Issue (severity, host_critical, hosts, project_groups, info_systems, last_alert_time) на основе связанных алертов с использованием SQL-агрегации.
 
 Планируемые тесты (не реализованы):
 

@@ -1058,7 +1058,7 @@ class Alert:
             
             # Обновляем атрибуты Issue после успешного линкования
             try:
-                issue.update_with_sql_aggregation()
+                issue.recalculate_and_update_issue()
                 logging.info(f"Атрибуты issue {issue_id} обновлены после привязки алерта {self.id}")
             except Exception as e:
                 logging.error(f"Ошибка при обновлении атрибутов issue {issue_id}: {str(e)}")
@@ -1074,7 +1074,7 @@ class Alert:
 
     # массовое связывание алертов с issue
     @staticmethod
-    def mass_link_to_issue(alerts, issue_id):
+    def link_alerts_to_issue(alerts, issue_id):
         """
         Массовое связывание алертов с задачей
         """
@@ -1095,7 +1095,7 @@ class Alert:
 
     # массовое отвязывание алертов от issue
     @staticmethod
-    def mass_unlink_from_issue(alerts):
+    def unlink_alerts_from_issue(alerts):
         """
         Массовое отвязывание алертов от задачи
         """

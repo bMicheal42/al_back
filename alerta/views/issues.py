@@ -214,8 +214,8 @@ def delete_issue(issue_id):
     # Массовое отвязывание всех алертов от проблемы
     try:
         if issue.alerts:
-            # Используем массовый метод Alert.mass_unlink_from_issue для отвязывания всех алертов
-            Alert.mass_unlink_from_issue(issue.alerts)
+            # Используем массовый метод Alert.unlink_alerts_from_issue для отвязывания всех алертов
+            Alert.unlink_alerts_from_issue(issue.alerts)
     except Exception as e:
         current_app.logger.warning(f'Failed to unlink alerts from issue {issue_id}: {str(e)}')
         

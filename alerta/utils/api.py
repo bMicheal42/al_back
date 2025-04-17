@@ -9,7 +9,7 @@ from alerta.exceptions import (AlertaException, ApiError, BlackoutPeriod,
                                ForwardingLoop, HeartbeatReceived,
                                InvalidAction, RateLimit, RejectException)
 from alerta.models.alert import Alert
-from alerta.models.issue import Issue, create_new_issue_for_alert, find_matching_issue, process_new_alert
+from alerta.models.issue import Issue
 from alerta.models.enums import Scope
 from alerta.utils.pattern_cache import PatternCache
 from alerta.utils.format import CustomJSONEncoder
@@ -134,11 +134,11 @@ def process_alert(alert: Alert) -> Alert:
         # Если ни один паттерн не подошел и это новый алерт, создаем новый Issue
 
         try:
-            # Используем функцию из модуля issue для создания Issue
-            logging.debug(f"No pattern matched for alert {alert.id}, creating new Issue using create_new_issue_for_alert")
+            # Используем метод класса Issue для создания Issue
+            logging.debug(f"No pattern matched for alert {alert.id}, creating new Issue using Issue.process_new_alert")
             
-            # Вызываем функцию create_new_issue_for_alert
-            issue_found = process_new_alert(alert)
+            # Вызываем метод process_new_alert класса Issue
+            issue_found = Issue.process_new_alert(alert)
             
         except Exception as e:
             logging.error(f"Error creating Issue for alert {alert.id}: {str(e)}")

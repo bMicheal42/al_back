@@ -12,9 +12,9 @@ from flask import current_app, g
 from alerta.app import db
 from alerta.database.base import Query
 from alerta.models.history import History
-from alerta.utils.format import DateTime, deep_serialize_datetime, CustomJSONEncoder
+from alerta.utils.format import DateTime
 from alerta.utils.response import absolute_url
-
+from alerta.models.alert import Alert
 # Импортируем Alert для функций, которые его используют
 from alerta.models.alert import Alert
 
@@ -218,7 +218,7 @@ class Issue:
             
         history = History(
             id=str(uuid4()),
-            event=self.summary,  # используем summary как event
+            event='issue',
             severity=self.severity,
             status=self.status,
             text=text,
@@ -239,27 +239,6 @@ class Issue:
             # Возвращаем текущий объект, если обновление не удалось
             return self
 
-
-    # resolve an issue
-    def resolve(self, text: str = '') -> 'Issue':
-        now = datetime.utcnow()
-        
-        return self.update(
-            status='resolved',
-            resolve_time=now,
-            change_type='resolve',
-            text=text or 'Issue resolved'
-        )
-        
-    # reopen an issue
-    def reopen(self, text: str = '') -> 'Issue':
-        return self.update(
-            status='open',
-            resolve_time=None,
-            change_type='reopen',
-            text=text or 'Issue reopened'
-        )
-        
     # delete an issue
     @classmethod
     def delete_by_id(cls, issue_id: str) -> bool:
@@ -295,27 +274,26 @@ class Issue:
         # Если это были последние алерты в Issue, Issue будет закрыт
         if not remaining_alert_ids:
             logging.debug(f"Last alerts removed from issue {self.id}, issue will be closed")
-            update_data['status'] = 'closed'
-            update_data['resolve_time'] = datetime.utcnow()
-            update_data['hosts'] = []
-            update_data['project_groups'] = []
-            update_data['info_systems'] = []
-            change_text += ' (issue closed as no alerts remain)'
-            
-            # Обновляем Issue в БД
-            updated_issue = self.update(
-                **update_data,
-                change_type='alerts-removed',
-                text=change_text
-            )
-            
-            # В случае закрытия issue, мы отвязываем все алерты
-            from alerta.models.alert import Alert
-            Alert.mass_unlink_from_issue(alert_ids_to_remove, self)
-            
-            return updated_issue
+            # update_data['status'] = 'closed'
+            # update_data['resolve_time'] = datetime.utcnow()
+            # update_data['hosts'] = []
+            # update_data['project_groups'] = []
+            # update_data['info_systems'] = []
+            # change_text += ' (issue closed as no alerts remain)'
+            #
+            # # Обновляем Issue в БД
+            # updated_issue = self.update(
+            #     **update_data,
+            #     change_type='alerts-removed',
+            #     text=change_text
+            # )
+            #
+            # # В случае закрытия issue, мы отвязываем все алерты
+            # from alerta.models.alert import Alert
+            # Alert.unlink_alerts_from_issue(alert_ids_to_remove, self)
+            #
+            # return updated_issue
         else:
-            # Обновляем список алертов
             updated_issue = self.update(
                 alerts=remaining_alert_ids,
                 change_type='alerts-removed',
@@ -324,34 +302,33 @@ class Issue:
             
             # Используем оптимизированный метод для массового отлинкования алертов от issue
             from alerta.models.alert import Alert
-            Alert.mass_unlink_from_issue(alert_ids_to_remove, self)
-            
-            # Обновляем атрибуты Issue с помощью SQL-агрегации
-            updated_issue = updated_issue.update_with_sql_aggregation()
+            Alert.unlink_alerts_from_issue(alert_ids_to_remove)
+
+            updated_issue = updated_issue.recalculate_and_update_issue()
             
             return updated_issue
 
     # обновление атрибутов Issue с использованием SQL-агрегации
-    def update_with_sql_aggregation(self) -> 'Issue':
+    def recalculate_and_update_issue(self) -> 'Issue':
         """
         Обновляет атрибуты Issue на основе связанных алертов,
         используя SQL-запросы для агрегации данных.
-        
+
         :return: Обновленный Issue
         """
         if not self.id:
             logging.warning("Невозможно обновить Issue без ID")
             return self
-        
+
         # Получаем обновленные атрибуты с помощью SQL
         try:
-            updated_attrs = recalculate_issue_attributes_sql(self.id)
-            
+            updated_attrs = Issue.recalculate_issue_attributes(self.id)
+
             # Если обновления отсутствуют, возвращаем текущий Issue
             if not updated_attrs:
                 logging.debug(f"Нет обновлений для Issue {self.id}")
                 return self
-            
+
             # Обновляем Issue
             return self.update(
                 **updated_attrs,
@@ -365,8 +342,9 @@ class Issue:
             # Возвращаем текущий объект без изменений в случае ошибки
             return self
 
+
     def mass_add_alerts(self, alerts) -> 'Issue':
-        """ #TODO оптимизировать на alerts_ids
+        """
         Оптимизированное массовое добавление алертов к Issue 
         с использованием SQL для проверки уникальности.
         
@@ -432,302 +410,273 @@ class Issue:
         )
         
         # Получаем список объектов Alert для передачи в метод mass_link_to_issue
-        from alerta.models.alert import Alert
         new_alerts = [alert for alert in alerts if alert.id in new_alert_ids]
         
         # Используем оптимизированный метод для массового линкования алертов к issue
-        Alert.mass_link_to_issue(new_alerts, self.id)
-        
+        Alert.link_alerts_to_issue(new_alerts, self.id)
+
         # Обновляем атрибуты Issue с помощью SQL-агрегации
-        updated_issue = updated_issue.update_with_sql_aggregation()
+        updated_issue = updated_issue.recalculate_and_update_issue()
         
         logging.info(f"Successfully added {new_alerts_count} alerts to issue {self.id}")
         return updated_issue
 
-    def add_alert(self, alert) -> 'Issue':
+    @classmethod
+    def find_matching_issue(cls, alert):
         """
-        Добавляет один алерт к Issue.
-        
-        :param alert: Объект Alert, который нужно добавить
-        :return: Обновленный Issue
+        Находит Issue для связывания с алертом на основе логики приоритета и общих полей.
+        Приоритет полей для сопоставления: хосты (event) > (project_group + info_system)
+        Теперь требуется совпадение и project_group, и info_system для группировки.
         """
-        return self.mass_add_alerts(alert)
-
-def find_matching_issue(alert):
-    """
-    Находит Issue для связывания с алертом на основе логики приоритета и общих полей.
-    Приоритет полей для сопоставления: хосты (event) > (project_group + info_system)
-    Теперь требуется совпадение и project_group, и info_system для группировки.
-    """
-    logging.debug(f"Поиск подходящего Issue для алерта {alert.id}")
-    
-    # Извлекаем event из алерта
-    event = alert.event
-    
-    # Извлекаем теги группы проекта и информационной системы из алерта
-    project_groups = []
-    info_systems = []
-    
-    for tag in alert.tags:
-        if tag.startswith('ProjectGroup:'):
-            project_groups.append(tag.split(':', 1)[1])
-        elif tag.startswith('InfoSystem:'):
-            info_systems.append(tag.split(':', 1)[1])
-    
-    logging.debug(f"Ищем Issue, соответствующие: event={event}, project_groups={project_groups}, info_systems={info_systems}")
-    
-    # Если нет project_group или info_system, то нельзя группировать по ним
-    if not project_groups or not info_systems:
-        logging.debug(f"У алерта отсутствует project_group или info_system, группировка только по event")
-    
-    # Получаем все активные Issue
-    # Используем объект Query из alerta.database.base
-    from alerta.database.base import Query
-    query = Query(where="status!='closed'", sort="create_time DESC", group="")
-    issues = Issue.find_all(query)
-    
-    logging.debug(f"Найдено активных Issue: {len(issues)}")
-    
-    # Массив для хранения подходящих Issue с приоритетами
-    matching_issues = []
-    
-    # Проверяем каждый Issue на соответствие
-    for issue in issues:
-        score = 0
+        logging.debug(f"Поиск подходящего Issue для алерта {alert.id}")
         
-        # Проверяем hosts (event)
-        if hasattr(issue, 'hosts') and event in issue.hosts:
-            score += 100  # Высший приоритет - соответствие event
-            logging.debug(f"Issue {issue.id}: совпадение по event (+100)")
+        # Извлекаем event из алерта
+        event = alert.event
         
-        # Проверка на совпадение и project_group, и info_system
-        # Требуется, чтобы и project_group, и info_system совпадали
-        if project_groups and info_systems and hasattr(issue, 'project_groups') and hasattr(issue, 'info_systems'):
-            # Проверяем совпадение project_group
-            project_group_match = False
-            for pg in project_groups:
-                if pg in issue.project_groups:
-                    project_group_match = True
-                    break
-            
-            # Проверяем совпадение info_system
-            info_system_match = False
-            for is_ in info_systems:
-                if is_ in issue.info_systems:
-                    info_system_match = True
-                    break
-            
-            # Если совпали и project_group, и info_system
-            if project_group_match and info_system_match:
-                score += 20  # Более высокий приоритет для совпадения обоих полей
-                logging.debug(f"Issue {issue.id}: совпадение по project_group и info_system (+20)")
+        # Извлекаем теги группы проекта и информационной системы из алерта
+        project_groups = []
+        info_systems = []
         
-        # Если есть совпадения, добавляем в список
-        if score > 0:
-            # Добавляем дополнительные очки за severity
-            severity_order = {'medium': 3, 'high': 4, 'critical': 5}
-            issue_severity = issue.severity if issue.severity else 'medium'
-            severity_score = severity_order.get(issue_severity, 3)
-            score = score + severity_score  # Учитываем severity при сортировке
+        for tag in alert.tags:
+            if tag.startswith('ProjectGroup:'):
+                project_groups.append(tag.split(':', 1)[1])
+            elif tag.startswith('InfoSystem:'):
+                info_systems.append(tag.split(':', 1)[1])
+        
+        logging.debug(f"Ищем Issue, соответствующие: event={event}, project_groups={project_groups}, info_systems={info_systems}")
+        
+        # Если нет project_group или info_system, то нельзя группировать по ним
+        if not project_groups or not info_systems:
+            logging.debug(f"У алерта отсутствует project_group или info_system, группировка только по event")
+        
+        # Получаем все активные Issue
+        # Используем объект Query из alerta.database.base
+        from alerta.database.base import Query
+        query = Query(where="status!='closed'", sort="create_time DESC", group="")
+        issues = cls.find_all(query)
+        
+        logging.debug(f"Найдено активных Issue: {len(issues)}")
+        
+        # Массив для хранения подходящих Issue с приоритетами
+        matching_issues = []
+        
+        # Проверяем каждый Issue на соответствие
+        for issue in issues:
+            score = 0
             
-            matching_issues.append((issue.id, score))
-            logging.debug(f"Issue {issue.id} добавлен в список совпадений с приоритетом {score}")
-    
-    # Сортируем по приоритету (по убыванию)
-    matching_issues.sort(key=lambda x: x[1], reverse=True)
-    
-    if matching_issues:
-        best_match_id = matching_issues[0][0]
-        logging.debug(f"Найден подходящий Issue: {best_match_id} с приоритетом {matching_issues[0][1]}")
-        return best_match_id
-    
-    logging.debug("Не найдено подходящих Issue")
-    return None
+            # Проверяем hosts (event)
+            if hasattr(issue, 'hosts') and event in issue.hosts:
+                score += 100  # Высший приоритет - соответствие event
+                logging.debug(f"Issue {issue.id}: совпадение по event (+100)")
+            
+            # Проверка на совпадение и project_group, и info_system
+            # Требуется, чтобы и project_group, и info_system совпадали
+            if project_groups and info_systems and hasattr(issue, 'project_groups') and hasattr(issue, 'info_systems'):
+                # Проверяем совпадение project_group
+                project_group_match = False
+                for pg in project_groups:
+                    if pg in issue.project_groups:
+                        project_group_match = True
+                        break
+                
+                # Проверяем совпадение info_system
+                info_system_match = False
+                for is_ in info_systems:
+                    if is_ in issue.info_systems:
+                        info_system_match = True
+                        break
+                
+                # Если совпали и project_group, и info_system
+                if project_group_match and info_system_match:
+                    score += 20  # Более высокий приоритет для совпадения обоих полей
+                    logging.debug(f"Issue {issue.id}: совпадение по project_group и info_system (+20)")
+            
+            # Если есть совпадения, добавляем в список
+            if score > 0:
+                # Добавляем дополнительные очки за severity
+                severity_order = {'medium': 3, 'high': 4, 'critical': 5}
+                issue_severity = issue.severity if issue.severity else 'medium'
+                severity_score = severity_order.get(issue_severity, 3)
+                score = score + severity_score  # Учитываем severity при сортировке
+                
+                matching_issues.append((issue.id, score))
+                logging.debug(f"Issue {issue.id} добавлен в список совпадений с приоритетом {score}")
+        
+        # Сортируем по приоритету (по убыванию)
+        matching_issues.sort(key=lambda x: x[1], reverse=True)
+        
+        if matching_issues:
+            best_match_id = matching_issues[0][0]
+            logging.debug(f"Найден подходящий Issue: {best_match_id} с приоритетом {matching_issues[0][1]}")
+            return best_match_id
+        
+        logging.debug("Не найдено подходящих Issue")
+        return None
 
-def process_new_alert(alert):
-    """
-    Обработка нового алерта и привязка к Issue при необходимости
-    
-    :param alert: Новый алерт
-    :return: Алерт после обработки
-    """
-    logging.debug(f"Processing new alert {alert.id} (event={alert.event})")
+    @classmethod
+    def process_new_alert(cls, alert):
+        """
+        Обработка нового алерта и привязка к Issue при необходимости
+        
+        :param alert: Новый алерт
+        :return: Алерт после обработки
+        """
+        logging.debug(f"Processing new alert {alert.id} (event={alert.event})")
 
-    # Проверка на сопоставление с существующими паттернами
-    pattern_matches = None
-    try:
-        pattern_matches = alert.pattern_match_duplicated()
-        if pattern_matches:
-            logging.debug(f"Found pattern matches for alert {alert.id}")
-    except Exception as e:
-        logging.error(f"Error during pattern matching: {str(e)}")
-    
-    if pattern_matches:
-        # Обрабатываем совпадение с существующими паттернами
+        issue_id = None
         try:
-            from alerta.utils.api import process_alert
-            logging.debug(f"Processing alert {alert.id} with patterns")
-            result = process_alert(alert)
-            logging.debug(f"Alert {alert.id} processed with patterns")
+            issue_id = cls.find_matching_issue(alert)
+        except Exception as e:
+            logging.error(f"Error finding matching issue: {str(e)}")
+        
+        if issue_id:
+            try:
+                # Получаем Issue и добавляем к нему алерт
+                issue = cls.find_by_id(issue_id)
+                logging.warning(f"Issue for linking Found: {issue.id}")
+                
+                try:
+                    # Передаем объекты Alert в виде списка в метод mass_add_alerts
+                    issue = issue.mass_add_alerts([alert])
+                    # Связываем алерт с Issue
+                    alert = alert.link_to_issue(issue)
+                    
+                    logging.info(f"Added alert {alert.id} to existing issue {issue_id}")
+                    return alert
+                except Exception as e:
+                    logging.error(f"Error adding alert to issue {issue_id}: {str(e)}")
+                    logging.error(f"Falling back to creating new Issue")
+            except Exception as e:
+                logging.error(f"Error finding issue {issue_id}: {str(e)}")
+                logging.error(f"Falling back to creating new Issue")
+        
+        # Если нет подходящего Issue, создаем новый
+        try:
+            result = cls.create_new_issue_for_alert(alert)
             return result
         except Exception as e:
-            logging.error(f"Error processing alert with patterns: {str(e)}")
-            logging.error(f"Falling back to Issue-based processing")
-    
-    # Если нет совпадений по паттернам, проверяем соответствие по новой логике
-    issue_id = None
-    try:
-        issue_id = find_matching_issue(alert)
-    except Exception as e:
-        logging.error(f"Error finding matching issue: {str(e)}")
-    
-    if issue_id:
-        try:
-            # Получаем Issue и добавляем к нему алерт
-            issue = Issue.find_by_id(issue_id)
-            logging.warning(f"Issue for linking Found: {issue.id}")
-            
-            try:
-                # Передаем объекты Alert в виде списка в метод mass_add_alerts
-                issue = issue.mass_add_alerts([alert])
-                # Связываем алерт с Issue
-                alert = alert.link_to_issue(issue)
-                
-                logging.info(f"Added alert {alert.id} to existing issue {issue_id}")
-                return alert
-            except Exception as e:
-                logging.error(f"Error adding alert to issue {issue_id}: {str(e)}")
-                logging.error(f"Falling back to creating new Issue")
-        except Exception as e:
-            logging.error(f"Error finding issue {issue_id}: {str(e)}")
-            logging.error(f"Falling back to creating new Issue")
-    
-    # Если нет подходящего Issue, создаем новый
-    try:
-        result = create_new_issue_for_alert(alert)
-        return result
-    except Exception as e:
-        logging.error(f"Error creating new issue for alert {alert.id}: {str(e)}")
-        # Возвращаем исходный алерт, если не удалось создать Issue
+            logging.error(f"Error creating new issue for alert {alert.id}: {str(e)}")
+            # Возвращаем исходный алерт, если не удалось создать Issue
+            return alert
+
+    @classmethod
+    def create_new_issue_for_alert(cls, alert):
+        """
+        Создает новый Issue для алерта и связывает алерт с этим Issue
+        
+        :param alert: Алерт, для которого создается Issue
+        :return: Алерт, привязанный к новому Issue
+        """
+        logging.debug(f"Creating new Issue for alert {alert.id}")
+        
+        # Извлекаем данные из алерта
+        event = alert.event
+        resource = alert.resource
+        
+        # Извлекаем первый тег проектной группы и информационной системы
+        project_group = None
+        info_system = None
+        
+        for tag in alert.tags:
+            if ':' in tag:
+                key, value = tag.split(':', 1)
+                if key == 'ProjectGroup' and project_group is None:
+                    project_group = value
+                    logging.debug(f"Extracted ProjectGroup tag: {value}")
+                elif key == 'InfoSystem' and info_system is None:
+                    info_system = value
+                    logging.debug(f"Extracted InfoSystem tag: {value}")
+        
+        # Если не нашли project_group или info_system, логируем предупреждение
+        if project_group is None:
+            logging.warning(f"No ProjectGroup tag found for alert {alert.id}")
+        if info_system is None:
+            logging.warning(f"No InfoSystem tag found for alert {alert.id}")
+        
+        # Преобразуем в списки с одним элементом или пустые списки
+        project_groups = [project_group] if project_group else []
+        info_systems = [info_system] if info_system else []
+        
+        # Формируем summary - если есть text, используем его, иначе формируем из event и resource
+        summary = alert.text if alert.text else f"Issue for {event} on {resource}"
+        
+        # Получаем host_critical из атрибутов алерта, если он есть
+        host_critical = '1'  # По умолчанию host_critical = 1
+        if hasattr(alert, 'attributes') and 'host_critical' in alert.attributes:
+            host_critical = alert.attributes['host_critical']
+            logging.debug(f"Using host_critical={host_critical} from alert attributes")
+        
+        # Проверяем severity и устанавливаем корректное значение
+        severity_order = {'medium': 3, 'high': 4, 'critical': 5}
+        severity = alert.severity if alert.severity in severity_order else 'medium'
+        logging.debug(f"Using severity={severity} for new Issue")
+        
+        # Создаем новый Issue
+        issue = Issue(
+            summary=summary,
+            severity=severity,
+            host_critical=host_critical,
+            status='open',
+            alerts=[alert.id],
+            hosts=[event],
+            project_groups=project_groups,
+            info_systems=info_systems
+        )
+        
+        # Сохраняем Issue
+        issue = issue.create()
+        logging.info(f"Created new Issue {issue.id} for alert {alert.id}")
+        
+        # Привязываем алерт к Issue
+        alert = alert.link_to_issue(issue)
+        logging.info(f"Linked alert {alert.id} to Issue {issue.id}")
+        
         return alert
 
-def create_new_issue_for_alert(alert):
-    """
-    Создает новый Issue для алерта и связывает алерт с этим Issue
-    
-    :param alert: Алерт, для которого создается Issue
-    :return: Алерт, привязанный к новому Issue
-    """
-    logging.debug(f"Creating new Issue for alert {alert.id}")
-    
-    # Извлекаем данные из алерта
-    event = alert.event
-    resource = alert.resource
-    
-    # Извлекаем первый тег проектной группы и информационной системы
-    project_group = None
-    info_system = None
-    
-    for tag in alert.tags:
-        if ':' in tag:
-            key, value = tag.split(':', 1)
-            if key == 'ProjectGroup' and project_group is None:
-                project_group = value
-                logging.debug(f"Extracted ProjectGroup tag: {value}")
-            elif key == 'InfoSystem' and info_system is None:
-                info_system = value
-                logging.debug(f"Extracted InfoSystem tag: {value}")
-    
-    # Если не нашли project_group или info_system, логируем предупреждение
-    if project_group is None:
-        logging.warning(f"No ProjectGroup tag found for alert {alert.id}")
-    if info_system is None:
-        logging.warning(f"No InfoSystem tag found for alert {alert.id}")
-    
-    # Преобразуем в списки с одним элементом или пустые списки
-    project_groups = [project_group] if project_group else []
-    info_systems = [info_system] if info_system else []
-    
-    # Формируем summary - если есть text, используем его, иначе формируем из event и resource
-    summary = alert.text if alert.text else f"Issue for {event} on {resource}"
-    
-    # Получаем host_critical из атрибутов алерта, если он есть
-    host_critical = '1'  # По умолчанию host_critical = 1
-    if hasattr(alert, 'attributes') and 'host_critical' in alert.attributes:
-        host_critical = alert.attributes['host_critical']
-        logging.debug(f"Using host_critical={host_critical} from alert attributes")
-    
-    # Проверяем severity и устанавливаем корректное значение
-    severity_order = {'medium': 3, 'high': 4, 'critical': 5}
-    severity = alert.severity if alert.severity in severity_order else 'medium'
-    logging.debug(f"Using severity={severity} for new Issue")
-    
-    # Создаем новый Issue
-    issue = Issue(
-        summary=summary,
-        severity=severity,
-        host_critical=host_critical,
-        status='open',
-        alerts=[alert.id],
-        hosts=[event],
-        project_groups=project_groups,
-        info_systems=info_systems
-    )
-    
-    # Сохраняем Issue
-    issue = issue.create()
-    logging.info(f"Created new Issue {issue.id} for alert {alert.id}")
-    
-    # Привязываем алерт к Issue
-    alert = alert.link_to_issue(issue)
-    logging.info(f"Linked alert {alert.id} to Issue {issue.id}")
-    
-    return alert
-
-
-def recalculate_issue_attributes_sql(issue_id: str) -> Dict[str, Any]:
-    """
-    Пересчитывает атрибуты Issue на основе связанных алертов, используя SQL-запросы
-    для агрегации данных.
-    
-    :param issue_id: ID Issue, для которого требуется пересчитать атрибуты
-    :return: Словарь с обновленными атрибутами Issue
-    """
-    from alerta.app import db
-    
-    logging.debug(f"Пересчет атрибутов для Issue {issue_id} с использованием SQL-агрегации")
-    
-    try:
-        # Получаем все агрегированные атрибуты за один вызов
-        agg_attrs = db.get_issue_aggregated_attributes(issue_id)
+    @classmethod
+    def recalculate_issue_attributes(cls, issue_id: str) -> Dict[str, Any]:
+        """
+        Пересчитывает атрибуты Issue на основе связанных алертов, используя SQL-запросы
+        для агрегации данных.
         
-        # Формируем словарь с обновленными атрибутами
-        updated_attrs = {
-            'severity': agg_attrs['severity'],
-            'host_critical': '1' if agg_attrs['host_critical'] else '0',
-            'hosts': agg_attrs['hosts'],
-            'project_groups': agg_attrs['project_groups'],
-            'info_systems': agg_attrs['info_systems']
-        }
+        :param issue_id: ID Issue, для которого требуется пересчитать атрибуты
+        :return: Словарь с обновленными атрибутами Issue
+        """
+        from alerta.app import db
         
-        # Добавляем last_alert_time, если оно есть
-        if agg_attrs['last_alert_time']:
-            updated_attrs['last_alert_time'] = agg_attrs['last_alert_time']
+        logging.debug(f"Пересчет атрибутов для Issue {issue_id} с использованием SQL-агрегации")
         
-        logging.debug(f"Результат SQL-агрегации для Issue {issue_id}: {updated_attrs}")
-        return updated_attrs
-    except Exception as e:
-        logging.error(f"Ошибка при выполнении SQL-агрегации для Issue {issue_id}: {str(e)}")
-        import traceback
-        logging.error(traceback.format_exc())
-        
-        # Возвращаем значения по умолчанию
-        default_attrs = {
-            'severity': 'medium',
-            'host_critical': '0',
-            'hosts': [],
-            'project_groups': [],
-            'info_systems': []
-        }
-        logging.warning(f"Используем значения по умолчанию для Issue {issue_id} из-за ошибки в SQL-агрегации")
-        return default_attrs
+        try:
+            # Получаем все агрегированные атрибуты за один вызов
+            agg_attrs = db.get_issue_aggregated_attributes(issue_id)
+            
+            # Формируем словарь с обновленными атрибутами
+            updated_attrs = {
+                'severity': agg_attrs['severity'],
+                'host_critical': '1' if agg_attrs['host_critical'] else '0',
+                'hosts': agg_attrs['hosts'],
+                'project_groups': agg_attrs['project_groups'],
+                'info_systems': agg_attrs['info_systems']
+            }
+            
+            # Добавляем last_alert_time, если оно есть
+            if agg_attrs['last_alert_time']:
+                updated_attrs['last_alert_time'] = agg_attrs['last_alert_time']
+            
+            logging.debug(f"Результат SQL-агрегации для Issue {issue_id}: {updated_attrs}")
+            return updated_attrs
+        except Exception as e:
+            logging.error(f"Ошибка при выполнении SQL-агрегации для Issue {issue_id}: {str(e)}")
+            import traceback
+            logging.error(traceback.format_exc())
+            
+            # Возвращаем значения по умолчанию
+            default_attrs = {
+                'severity': 'medium',
+                'host_critical': '1',
+                'hosts': [],
+                'project_groups': [],
+                'info_systems': []
+            }
+            logging.warning(f"Используем значения по умолчанию для Issue {issue_id} из-за ошибки в SQL-агрегации")
+            return default_attrs
