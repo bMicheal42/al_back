@@ -26,7 +26,7 @@ wheels/
 MANIFEST
 build.py
 .gitone/
-
+alertad.conf
 
 # PyInstaller
 #  Usually these files are written by a python script from a template

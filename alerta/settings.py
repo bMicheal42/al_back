@@ -37,16 +37,7 @@ PATTERN_GROUPING_TIME_WINDOW = 0  # seconds
 JIRA_URL = 'https://issues.sdventures.com'
 JIRA_PROJECT = 'SD'
 
-JIRA_SEVERITY = {
-    '0': '11324',
-    '1': '11325',
-    '2': '11324',
-    '3': '11323',
-    '4': '11322',
-    '5': '11321'
-}
 JIRA_PROJECTGROUPS = [
-    "None",
     "AF",
     "BB",
     "Common service",
@@ -66,20 +57,21 @@ JIRA_PROJECTGROUPS = [
     "ZBX",
     "Zill"
 ]
+
 JIRA_OWNERS_GROUPS = {
-    'af-admins':          'JIRA_AsD&AF-operational-team',
-    'cp-admins':          'JIRA_CP-operational-team',
-    'cp-front-admins':    'JIRA_CP-operational-team',
-    'cp-sre':             'JIRA_CP-operational-team',
+    'af-admins':          'JIRA_AsD-&-AF-operation-team',
+    'cp-admins':          'JIRA_CP-support-team',
+    'cp-front-admins':    'JIRA_CP-support-team',
+    'cp-sre':             'JIRA_CP-support-team',
     'dba':                'JIRA_Database-administrators-team',
     'domain-admin':       'JIRA_Domains-support-team',
-    'eva-ai-mlops':       'JIRA_NP-devops-team',
-    'hosting-admin-team': 'JIRA_Data-center-operations-team',
+    'eva-ai-mlops':       'JIRA-Lab-Operational-Team',
+    'hosting-admin-team': 'JIRA_Data-Center-Operations-Team',
     'hosting-assets':     'JIRA_Infrastructure-assets',
     'infr-sre':           'JIRA_Infrastructure-platform-team',
-    'lab-ops':            'JIRA-Lab-operations-team',
-    'network-team':       'JIRA_Network-operations-team',
-    'np-devops':          'JIRA_NP-devops-team',
+    'lab-ops':            'JIRA-Lab-Operational-Team',
+    'network-team':       'JIRA_Network-Operations-Center',
+    'np-devops':          'JIRA-Lab-Operational-Team',
     'retn-infr-admins':   'JIRA_Retention-support-team',
     'ssl-team':           'JIRA_Domains-support-team',
     'zbx-admins':         'JIRA_Monitoring-development-team'
@@ -110,6 +102,18 @@ ZABBIX_SEVERITY_MAPPING = {
     'Высокая':            'high',
     'Критическая':        'critical'
 }
+
+JIRA_SEVERITY_LEVEL = {
+    'medium': '20586',
+    'high': '20587',
+    'critical': '20588'
+}
+
+JIRA_CRITICAL = {
+    '0': '20589',
+    '1': '20590'
+}
+
 
 # MongoDB (deprecated, use DATABASE_URL setting)
 MONGO_URI = 'mongodb://localhost:27017/monitoring'
@@ -158,7 +162,7 @@ ALLOW_READONLY = False
 READONLY_SCOPES = ['read']
 
 BASIC_AUTH_REALM = 'Alerta'
-SIGNUP_ENABLED = True
+SIGNUP_ENABLED = False
 
 HMAC_AUTH_CREDENTIALS = [
     # {
@@ -304,7 +308,7 @@ DEFAULT_AUDIO_FILE = None  # must exist on client at relative path eg. '/audio/a
 COLUMNS = [
     'createTime', 'lastReceiveTime', 'severity', 'status', 'timeInStatus', 'dutyadmin', 'text', 'patterns', 'jiraKey']
 SORT_LIST_BY = ['lastReceiveTime']  # eg. newest='lastReceiveTime' or oldest='-createTime' (Note: minus means reverse)
-DEFAULT_FILTER = {'status': ['open', 'ack', 'fixing-by-24/7', 'pending', 'observation', 'escalated', 'false-positive', 'flap', 'closed']}
+DEFAULT_FILTER = {'status': ['open', 'ack', 'fixing-by-24/7', 'pending', 'observation', 'escalated', 'false-positive']}
 CLIPBOARD_TEMPLATE = ''
 
 

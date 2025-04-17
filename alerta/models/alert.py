@@ -554,6 +554,9 @@ class Alert:
                         alert.update_attributes(alert.attributes)
                     returning = alert
                 return returning, False
+            elif not found and resolved_in_zabbix:
+                logging.error(f"Not existing alert with OK state came from Zabbix event_id: {zabbix_id}")
+                return self, False
             else:
                 ZABBIX_SEVERITY_MAPPING = current_app.config.get('ZABBIX_SEVERITY_MAPPING', {})
                 zabbix_severity = self.attributes.get('zabbix_severity', None)
@@ -726,7 +729,7 @@ class Alert:
                 logging.debug(f"[close recalculation] 4 parent [{parent.id}] status={parent.status}")
                 self.attributes['zabbix_resolved'] = True
                 if all_childs_resolved or not children:
-                    return self.from_action('close', 'Resolved inc alert from zabbix', timeout=None)
+                    return self.from_action('close', 'Auto ', timeout=None)
                 else:
                     self.set_status(self.status, text='Resolved inc alert from zabbix')
                     return self

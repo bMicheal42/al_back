@@ -125,13 +125,23 @@ class StateMachine(AlarmModel):
         else:
             return TrendIndication.No_Change
 
-    def jira_transition(self, alert, transition_name: str, resolution=None):
-        if alert.attributes.get('jira_key'):
-            jira_client = JiraClient()
-            result, new_status = jira_client.transition_ticket(alert.attributes['jira_key'], transition_name, resolution=resolution)
-            # FIXME set log level to info
-            if new_status:
-                alert.attributes['jira_status'] = new_status
+    def jira_transition(self, alert, transition_id: str):
+        jira_key = alert.attributes.get('jira_key')
+        if not jira_key:
+            logging.warning(f"[JIRA] У алерта нет jira_key, переход '{transition_id}' не выполнен.")
+            return False
+
+        jira_client = JiraClient()
+        success, new_status = jira_client.transition_ticket(jira_key, transition_id)
+
+        if success:
+            logging.info(f"[JIRA] Успешный переход алерта '{alert.id}' (JIRA: {jira_key}) в статус '{new_status}'.")
+            alert.attributes['jira_status'] = new_status #TODO может выпилим?
+            return True
+        else:
+            logging.warning(f"[JIRA] Не удалось выполнить переход '{transition_id}' для алерта '{alert.id}' (JIRA: {jira_key}).")
+            return False
+
 
     def transition(self, alert, current_status=None, previous_status=None, action=None, **kwargs):
         current_status = current_status or StateMachine.DEFAULT_STATUS
@@ -139,6 +149,7 @@ class StateMachine(AlarmModel):
         current_severity = alert.severity
         previous_severity = alert.previous_severity or StateMachine.DEFAULT_PREVIOUS_SEVERITY
         valid_severities = sorted(StateMachine.Severity, key=StateMachine.Severity.get)
+        is_incident = alert.attributes.get('jira_key')
         if current_severity not in StateMachine.Severity:
             raise ApiError(f"Severity ({current_severity}) is not one of {', '.join(valid_severities)}", 400)
 
@@ -200,9 +211,9 @@ class StateMachine(AlarmModel):
             else:
                 return next_state('OPEN-0', current_severity, Status.Open)
 
-        if action == Action.FALSE_POSITIVE and not state == Status.False_positive:
-            if not state == Status.Escalated and not state == Status.Pending and not state == Status.Open and not state == Status.Ack:
-                self.jira_transition(alert, 'Resolved', 'False Positive')
+        if action == Action.FALSE_POSITIVE and state != Status.False_positive and state != Status.Closed:
+            if is_incident:
+                self.jira_transition(alert, '261')
             return next_state('FALSE-POSITIVE-0', current_severity, Status.False_positive)
 
         if action == Action.FLAP and not state == Status.Flap:
@@ -212,11 +223,10 @@ class StateMachine(AlarmModel):
             return next_state('ESCALATED-0', current_severity, Status.Escalated)
 
         if action == Action.CLOSE and not state == Status.Closed:
-            if state == Status.Obs:
-                self.jira_transition(alert, 'Resolved', 'Fixed by 24/7')
-            elif not state == Status.Escalated and not state == Status.Pending and not state == Status.Open and not state == Status.Ack:
-                self.jira_transition(alert, 'Resolved', 'Self-healed')
-
+            if is_incident and state == Status.Obs:
+                self.jira_transition(alert, '271') # 'Fixed by 24/7'
+            elif is_incident and state != Status.Escalated and state != Status.Pending and state != Status.False_positive:
+                self.jira_transition(alert, '201') # 'Self-healed'
             return next_state('CLOSE-0', current_severity, Status.Closed)
 
         if state == Status.Open:
@@ -247,16 +257,18 @@ class StateMachine(AlarmModel):
 
         if state == Status.Inc:
             if action == Action.AIDONE:
-                self.jira_transition(alert, 'AI Completed')
-                return next_state('INC-0', current_severity, Status.Obs)
-            if action == Action.ESC:
-                self.jira_transition(alert, 'Escalation')
-                return next_state('INC-1', current_severity, Status.Pending)
+                self.jira_transition(alert, '81')
+                return next_state('OBS-0', current_severity, Status.Obs)
+            elif action == Action.ESC:
+                self.jira_transition(alert, '161')
+                return next_state('PEN-0', current_severity, Status.Pending)
 
         if state == Status.Obs:
             if action == Action.ESC:
-                self.jira_transition(alert, 'Escalation')
-                return next_state('OBS-0', current_severity, Status.Pending)
+                self.jira_transition(alert, '161')
+                return next_state('PEN-1', current_severity, Status.Pending)
+            elif action == Action.AIDONE: # TODO for several AI done during observation
+                return next_state('OBS-2', current_severity, current_status)
 
         if state == Status.Shelved:
             if action == Action.OPEN:
@@ -279,6 +291,8 @@ class StateMachine(AlarmModel):
                 raise InvalidAction(f'invalid action for current {state} status')
             if action == Action.SHELVE:
                 raise InvalidAction(f'invalid action for current {state} status')
+            if action == Action.FALSE_POSITIVE:
+                raise InvalidAction(f'invalid action for current {state} status')
             if action == Action.CLOSE:
                 raise InvalidAction(f'alert is already in {state} status')
 
@@ -294,6 +308,7 @@ class StateMachine(AlarmModel):
             if StateMachine.Severity[current_severity] != StateMachine.NORMAL_SEVERITY_LEVEL:
                 return next_state('EXP-1', current_severity, Status.Open)
 
+        logging.error(f'No action found for state: {state}, action: {action}, alert_id: {alert.id} ')
         return next_state('ALL-*', current_severity, current_status)
 
     @staticmethod

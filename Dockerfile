@@ -16,6 +16,7 @@ LABEL org.opencontainers.image.description="Alerta API (dev)" \
 ENV ALERTA_ENDPOINT=http://localhost:8080
 ENV ZABBIX_USER=dd-zapi-user
 ENV ZABBIX_PASSWORD=FGsmaq77l1-Rgf41i2I0
+ENV PLUGINS=acked_by
 
 RUN apt-get update && \
     apt-get upgrade -y && \

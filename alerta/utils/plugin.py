@@ -33,7 +33,7 @@ class Plugins:
         banner = '\n' + '='*60 + '\n' + 'ALERTA PLUGINS INITIALIZATION' + '\n' + '='*60
         print(banner)
         LOG.warning(banner)  # Using warning to ensure visibility with default log level
-        
+
         # Find all available plugins
         entry_points = {}
         available_plugins = []
@@ -41,17 +41,19 @@ class Plugins:
             LOG.debug(f"Server plugin '{ep.name}' found.")
             entry_points[ep.name] = ep
             available_plugins.append(ep.name)
-        
+
         plugins_info = f"Available plugins: {', '.join(available_plugins)}"
         print(plugins_info)
         LOG.warning(plugins_info)
-        
+
         enabled_info = f"Enabled plugins: {', '.join(self.config['PLUGINS'])}"
         print(enabled_info)
         LOG.warning(enabled_info)
-        
+
         # Load enabled plugins
         for name in self.config['PLUGINS']:
+            if name != 'acked_by': # TODO ...
+                continue
             try:
                 plugin = entry_points[name].load()
                 if plugin:
@@ -66,9 +68,9 @@ class Plugins:
 
         # Log summary
         summary = (
-            '\n' + '='*60 + '\n' + 
-            f"Total plugins: available={len(available_plugins)}, enabled={len(self.config['PLUGINS'])}, loaded={len(self.plugins)}" +
-            '\n' + '='*60
+                '\n' + '='*60 + '\n' +
+                f"Total plugins: available={len(available_plugins)}, enabled={len(self.config['PLUGINS'])}, loaded={len(self.plugins)}" +
+                '\n' + '='*60
         )
         print(summary)
         LOG.warning(summary)
