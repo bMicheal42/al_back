@@ -365,18 +365,23 @@ class Issue:
             # Возвращаем текущий объект без изменений в случае ошибки
             return self
 
-    def mass_add_alerts(self, alerts: List) -> 'Issue':
+    def mass_add_alerts(self, alerts) -> 'Issue':
         """ #TODO оптимизировать на alerts_ids
         Оптимизированное массовое добавление алертов к Issue 
         с использованием SQL для проверки уникальности.
         
-        :param alerts: Список объектов Alert, которые нужно добавить
+        :param alerts: Список объектов Alert или один объект Alert, которые нужно добавить
         :return: Обновленный Issue
         """
+        # Проверяем, является ли alerts итерируемым объектом или одиночным Alert
         if not alerts:
             logging.debug(f"Список алертов для добавления пуст")
             return self
-        
+            
+        # Преобразуем одиночный алерт в список
+        if hasattr(alerts, 'id'):  # Это одиночный объект Alert
+            alerts = [alerts]
+            
         # Собираем идентификаторы алертов для добавления
         alert_ids_to_add = [alert.id for alert in alerts]
         
@@ -438,6 +443,15 @@ class Issue:
         
         logging.info(f"Successfully added {new_alerts_count} alerts to issue {self.id}")
         return updated_issue
+
+    def add_alert(self, alert) -> 'Issue':
+        """
+        Добавляет один алерт к Issue.
+        
+        :param alert: Объект Alert, который нужно добавить
+        :return: Обновленный Issue
+        """
+        return self.mass_add_alerts(alert)
 
 def find_matching_issue(alert):
     """

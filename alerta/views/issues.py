@@ -59,19 +59,35 @@ def get_issue(issue_id):
 @jsonp
 def list_issues():
     query_params = request.args.to_dict()
-
-    #  костыль чтобы начало работать
+    
+    # Формируем условия для запроса
+    where_conditions = []
+    
+    # Фильтры по статусу, если указаны
+    if 'status' in query_params:
+        where_conditions.append(f"status='{query_params['status']}'")
+    
+    # Фильтры по другим параметрам (при необходимости)
+    if 'severity' in query_params:
+        where_conditions.append(f"severity='{query_params['severity']}'")
+    
+    # Объединяем условия
+    where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
+    
+    # Сортировка
+    sort = query_params.get('sort', 'create_time DESC')
+    
+    # Создаем объект Query
+    query = Query(where=where_clause, sort=sort, group="")
+    
+    # Пагинация
     page = Page.from_params(query_params, 1000)
-
-    total = 0
-    issues = []
-
-    query = qb.issues.from_params(query_params)
+    
+    # Получаем данные
     issues = Issue.find_all(query, page.page, page.page_size)
     total = len(issues)
-
-
-    # костыль чтобы начало работать
+    
+    # Расчет пагинации
     total_pages = total // page.page_size + (1 if total % page.page_size > 0 else 0)
     has_more = page.page < total_pages
 
@@ -185,69 +201,6 @@ def get_issue_alerts(issue_id):
         )
 
 
-@api.route('/issue/<issue_id>/alert/<alert_id>', methods=['OPTIONS', 'PUT'])
-@cross_origin()
-@permission('write:issues')
-@jsonp
-def add_alert_to_issue(issue_id, alert_id):
-    issue = Issue.find_by_id(issue_id) #TODO оптимизировать
-    if not issue:
-        raise ApiError('Issue not found', 404)
-        
-    alert = Alert.find_by_id(alert_id)
-    if not alert:
-        raise ApiError('Alert not found', 404)
-        
-    if alert.issue_id and alert.issue_id != issue_id:
-        # Alert already assigned to another issue
-        raise ApiError('Alert already assigned to another issue', 409)
-        
-    try:
-        alert = alert.link_to_issue(issue)
-        issue = issue.mass_add_alerts([alert])
-    except Exception as e:
-        raise ApiError(str(e), 500)
-        
-    write_audit_trail.send(current_app._get_current_object(), event='alert-linked', message='Alert linked to issue',
-                         user=g.login, customers=g.customers, scopes=g.scopes, resource_id=alert.id,
-                         type='alert', request=request)
-                         
-    return jsonify(status='ok', issue=issue.serialize, alert=alert.serialize)
-
-
-@api.route('/issue/<issue_id>/alert/<alert_id>', methods=['OPTIONS', 'DELETE'])
-@cross_origin()
-@permission('write:issues')
-@jsonp
-def remove_alert_from_issue(issue_id, alert_id):
-    issue = Issue.find_by_id(issue_id)
-    if not issue:
-        raise ApiError('Issue not found', 404)
-        
-    alert = Alert.find_by_id(alert_id)
-    if not alert:
-        raise ApiError('Alert not found', 404)
-        
-    if not alert.issue_id or alert.issue_id != issue_id:
-        # Alert not assigned to this issue
-        raise ApiError('Alert not assigned to this issue', 409)
-        
-    try:
-        alert = alert.unlink_from_issue()
-        issue = issue.remove_alert(alert_id)
-    except ValueError as e:
-        # Перехватываем ошибку о невозможности удаления последнего алерта
-        raise ApiError(str(e), 400)
-    except Exception as e:
-        raise ApiError(str(e), 500)
-        
-    write_audit_trail.send(current_app._get_current_object(), event='alert-unlinked', message='Alert unlinked from issue',
-                         user=g.login, customers=g.customers, scopes=g.scopes, resource_id=alert.id,
-                         type='alert', request=request)
-                         
-    return jsonify(status='ok', issue=issue.serialize, alert=alert.serialize)
-
-
 @api.route('/issue/<issue_id>', methods=['OPTIONS', 'DELETE'])
 @cross_origin()
 @permission('write:issues')
@@ -258,14 +211,13 @@ def delete_issue(issue_id):
     if not issue:
         raise ApiError('Issue not found', 404)
         
-    # Unlink all alerts from this issue
-    for alert_id in issue.alerts: #TODO оптимизировать
-        try:
-            alert = Alert.find_by_id(alert_id)
-            if alert and alert.issue_id == issue_id:
-                alert.unlink_from_issue()
-        except Exception as e:
-            current_app.logger.warning(f'Failed to unlink alert {alert_id}: {str(e)}')
+    # Массовое отвязывание всех алертов от проблемы
+    try:
+        if issue.alerts:
+            # Используем массовый метод Alert.mass_unlink_from_issue для отвязывания всех алертов
+            Alert.mass_unlink_from_issue(issue.alerts)
+    except Exception as e:
+        current_app.logger.warning(f'Failed to unlink alerts from issue {issue_id}: {str(e)}')
         
     try:
         deleted = Issue.delete_by_id(issue_id)
@@ -280,51 +232,3 @@ def delete_issue(issue_id):
         return jsonify(status='ok')
     else:
         raise ApiError('Issue not deleted', 500)
-
-
-@api.route('/issue/<issue_id>/resolve', methods=['OPTIONS', 'PUT'])
-@cross_origin()
-@permission('write:issues')
-@jsonp
-def resolve_issue(issue_id):
-    issue = Issue.find_by_id(issue_id)
-
-    if not issue:
-        raise ApiError('Issue not found', 404)
-        
-    text = request.json.get('text', '') if request.json else ''
-    
-    try:
-        issue = issue.resolve(text=text)
-    except Exception as e:
-        raise ApiError(str(e), 500)
-        
-    write_audit_trail.send(current_app._get_current_object(), event='issue-resolved', message='Issue resolved',
-                         user=g.login, customers=g.customers, scopes=g.scopes, resource_id=issue.id,
-                         type='issue', request=request)
-
-    return jsonify(status='ok', issue=issue.serialize)
-
-
-@api.route('/issue/<issue_id>/reopen', methods=['OPTIONS', 'PUT'])
-@cross_origin()
-@permission('write:issues')
-@jsonp
-def reopen_issue(issue_id):
-    issue = Issue.find_by_id(issue_id)
-
-    if not issue:
-        raise ApiError('Issue not found', 404)
-        
-    text = request.json.get('text', '') if request.json else ''
-    
-    try:
-        issue = issue.reopen(text=text)
-    except Exception as e:
-        raise ApiError(str(e), 500)
-        
-    write_audit_trail.send(current_app._get_current_object(), event='issue-reopened', message='Issue reopened',
-                         user=g.login, customers=g.customers, scopes=g.scopes, resource_id=issue.id,
-                         type='issue', request=request)
-
-    return jsonify(status='ok', issue=issue.serialize) 

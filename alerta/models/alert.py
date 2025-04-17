@@ -1053,7 +1053,7 @@ class Alert:
         
         try:
             logging.warning(f"Обновление issue_id для алерта {self.id} на {issue_id}")
-            result = Alert.from_db(db.update_alert_issue_id(self.id, issue_id, history))
+            result = Alert.from_db(db.update_issueid_for_alert(self.id, issue_id))
             logging.warning(f"Результат привязки алерта {self.id} к issue {issue_id}: issue_id={result.issue_id if result else None}")
             
             # Обновляем атрибуты Issue после успешного линкования
@@ -1084,51 +1084,14 @@ class Alert:
         logging.info(f"Mass linking {len(alerts)} alerts to issue {issue_id}")
         
         try:
-            return db.mass_update_issue_id(
+            return db.update_issueid_for_alerts(
                 alerts=alerts,
-                issue_id=issue_id
+                new_issue_id=issue_id
             )
         except Exception as e:
             logging.error(f"Error mass linking alerts to issue {issue_id}: {e}")
             raise
 
-    # unlink alert from issue
-    def unlink_from_issue(self) -> 'Alert':
-        if not self.issue_id:
-            return self
-            
-        issue_id = self.issue_id
-        
-        # Проверка, является ли алерт последним для данного issue
-        from alerta.models.issue import Issue
-        issue = Issue.find_by_id(issue_id)
-        if issue and len(issue.alerts) <= 1 and issue.alerts[0] == self.id:
-            logging.warning(f"Невозможно отвязать последний алерт {self.id} от issue {issue_id}")
-            raise ValueError(f"Невозможно отвязать последний алерт от issue {issue_id}. Сначала добавьте другие алерты или закройте issue.")
-            
-        history = History(
-            id=self.id,
-            event=self.event,
-            severity=self.severity,
-            status=self.status,
-            value=self.value,
-            text=f'Alert unlinked from issue {issue_id}',
-            change_type='unlink-issue',
-            update_time=datetime.utcnow(),
-            user=g.login if hasattr(g, 'login') else None
-        )
-        
-        self.history.append(history)
-        self.issue_id = None
-        
-        result = Alert.from_db(db.update_alert_issue_id(self.id, None, history))
-        
-        # Обновляем атрибуты Issue после успешного отлинкования
-        if issue:
-            issue.update_with_sql_aggregation()
-            logging.info(f"Атрибуты issue {issue_id} обновлены после отвязки алерта {self.id}")
-        
-        return result
 
     # массовое отвязывание алертов от issue
     @staticmethod
@@ -1142,9 +1105,8 @@ class Alert:
         logging.info(f"Mass unlinking {len(alerts)} alerts from issue")
         
         try:
-            return db.mass_update_issue_id(
-                alerts=alerts,
-                issue_id=None
+            return db.update_issueid_for_alerts(
+                alerts=alerts
             )
         except Exception as e:
             logging.error(f"Error mass unlinking alerts from issue: {e}")

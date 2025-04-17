@@ -537,7 +537,7 @@ class Database(Base):
     def delete_issue(self, issue_id):
         raise NotImplementedError
 
-    def update_alert_issue_id(self, alert_id, issue_id, history=None):
+    def update_issueid_for_alert(self, alert_id, issue_id):
         raise NotImplementedError
 
 

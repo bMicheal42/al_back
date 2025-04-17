@@ -1,4 +1,5 @@
 import logging
+import traceback
 import threading
 import time
 from collections import defaultdict, namedtuple
@@ -6,8 +7,6 @@ from datetime import datetime, timezone
 from typing import List, Dict, Any
 import json
 import re
-from copy import deepcopy
-from uuid import uuid4
 
 import psycopg2
 from flask import current_app
@@ -19,7 +18,7 @@ from alerta.database.base import Database
 from alerta.exceptions import NoCustomerMatch
 from alerta.models.enums import ADMIN_SCOPES
 from alerta.models.heartbeat import HeartbeatStatus
-from alerta.utils.format import DateTime, CustomJSONEncoder
+from alerta.utils.format import DateTime
 from alerta.utils.response import absolute_url
 
 from .utils import Query
@@ -2278,7 +2277,6 @@ class Backend(Database):
         
         try:
             # Добавляем отладочное логирование
-            import logging
             logging.debug(f"Executing SQL: {modified_query}")
             logging.debug(f"With parameters: {vars}")
             
@@ -2397,11 +2395,6 @@ class Backend(Database):
         return self._fetchall(select, query.vars, limit=page_size*5000, offset=0)
 
     def update_issue(self, issue_id, update, update_time=None, history=None):
-        from datetime import datetime
-        from alerta.utils.format import DateTime
-        import logging
-        import json
-        
         update_time = update_time or datetime.utcnow()
         if isinstance(update_time, datetime):
             update_time = DateTime.iso8601(update_time)
@@ -2468,11 +2461,9 @@ class Backend(Database):
             WHERE id = %s
             RETURNING id
         """
-        return bool(self._delete(delete, (issue_id,)))
+        return bool(self._deleteone(delete, (issue_id,), returning=True))
 
-    def update_alert_issue_id(self, alert_id, issue_id, history=None):
-        import logging
-        
+    def update_issueid_for_alert(self, alert_id, issue_id):
         update = """
             UPDATE alerts
             SET issue_id = %s
@@ -2482,175 +2473,57 @@ class Backend(Database):
         logging.info(f"Обновление issue_id алерта {alert_id} на {issue_id}")
         return self._updateone(update, (issue_id, alert_id), returning=True)
 
-    def mass_update_issue_id(self, alerts, issue_id):
+    def update_issueid_for_alerts(self, alerts: List, new_issue_id: str = None) -> List[dict]:
         """
-        Обновление issue_id для списка алертов, используя один SQL-запрос
-        Массовое связывание или отвязывание алертов от задачи
-
-        :param alerts: Список объектов Alert для обновления
-        :param issue_id: ID задачи (может быть None для отвязки)
+        Массовое обновление issue_id для списка алертов.
+        
+        :param alerts: Список объектов Alert, которые нужно обновить
+        :param new_issue_id: Новый ID задачи (None для отлинковки)
         :return: Список обновленных алертов
         """
         if not alerts:
+            logging.warn('No alerts to update with new issue_id')
             return []
             
-        # Извлекаем ID алертов из объектов Alert
-        alert_ids = [a.id for a in alerts]
-
-        # Простое обновление без добавления истории
-        update_sql = """
-        UPDATE alerts 
-        SET issue_id = %s 
-        WHERE id IN %s
-        RETURNING *
-        """
-        
-        # Проверяем, что alert_ids не пустой
-        if not alert_ids:
-            import logging
-            logging.warning("Попытка обновить issue_id для пустого списка алертов")
-            return []
-
-        try:
-            # Выполняем запрос на обновление
-            updated = list(self._fetchall(update_sql, (issue_id, tuple(alert_ids))))
+        # Получаем список ID алертов из объектов Alert
+        alert_ids = [alert.id for alert in alerts]
             
-            # Логирование
-            import logging
-            action = "привязки к" if issue_id else "отвязки от"
-            logging.info(f"Выполнено массовое обновление {action} задачи {issue_id} для {len(updated)} алертов")
+        # Преобразуем None в NULL для SQL запроса
+        if new_issue_id:
+            query = """
+            UPDATE alerts SET issue_id = %s
+            WHERE id = ANY(%s)
+            RETURNING *
+            """
+            action = 'link'
             
-            return updated
-        except Exception as e:
-            import logging
-            logging.error(f"Ошибка при массовом обновлении issue_id: {str(e)}")
-            import traceback
-            logging.error(traceback.format_exc())
-            raise
+            # Используем стандартный метод _updateall
+            try:
+                results = self._updateall(query, (new_issue_id, alert_ids), returning=True)
+                if not results:
+                    logging.warn(f'No alerts with ids {alert_ids} to link to issue {new_issue_id}')
+                return results
+            except Exception as e:
+                logging.error(f'Error during mass update issue_id: {e}')
+                raise e
+        else:
+            query = """
+            UPDATE alerts SET issue_id = NULL
+            WHERE id = ANY(%s)
+            RETURNING *
+            """
+            action = 'unlink'
+            
+            # Используем стандартный метод _updateall
+            try:
+                results = self._updateall(query, (alert_ids,), returning=True)
+                if not results:
+                    logging.warn(f'No alerts with ids {alert_ids} to unlink from issue')
+                return results
+            except Exception as e:
+                logging.error(f'Error during mass update issue_id: {e}')
+                raise e
 
-    def get_issue_max_severity(self, issue_id):
-        """
-        Получает максимальное значение severity среди алертов, связанных с issue_id.
-        
-        :param issue_id: ID проблемы
-        :return: Максимальная severity или 'normal', если нет алертов
-        """
-        select = """
-            SELECT MAX(CASE
-                WHEN severity = 'critical' THEN 5
-                WHEN severity = 'major' THEN 4
-                WHEN severity = 'minor' THEN 3
-                WHEN severity = 'warning' THEN 2
-                ELSE 1
-            END) AS max_sev
-            FROM alerts
-            WHERE issue_id = %s AND status != 'expired'
-        """
-        cursor = self.get_db().cursor()
-        cursor.execute(select, (issue_id,))
-        result = cursor.fetchone()
-        cursor.close()
-        
-        # Преобразовать числовое значение обратно в текст
-        if result and result[0]:
-            max_sev = result[0]
-            if max_sev == 5:
-                return 'critical'
-            elif max_sev == 4:
-                return 'major'
-            elif max_sev == 3:
-                return 'minor'
-            elif max_sev == 2:
-                return 'warning'
-        
-        return 'normal'
-    
-    def get_issue_host_critical(self, issue_id):
-        """
-        Проверяет, есть ли хотя бы один алерт с host_critical='1' для issue_id.
-        
-        :param issue_id: ID проблемы
-        :return: True если есть хотя бы один критичный хост, иначе False
-        """
-        select = """
-            SELECT COUNT(*)
-            FROM alerts
-            WHERE issue_id = %s AND attributes->>'host_critical' = '1' AND status != 'expired'
-        """
-        cursor = self.get_db().cursor()
-        cursor.execute(select, (issue_id,))
-        result = cursor.fetchone()
-        cursor.close()
-        
-        return result[0] > 0 if result else False
-    
-    def get_issue_unique_hosts(self, issue_id):
-        """
-        Получает список уникальных хостов из алертов, связанных с issue_id.
-        
-        :param issue_id: ID проблемы
-        :return: Список уникальных хостов
-        """
-        select = """
-            SELECT DISTINCT event
-            FROM alerts
-            WHERE issue_id = %s AND status != 'expired'
-            ORDER BY event
-        """
-        cursor = self.get_db().cursor()
-        cursor.execute(select, (issue_id,))
-        result = cursor.fetchall()
-        cursor.close()
-        
-        return [r[0] for r in result] if result else []
-    
-    def get_issue_unique_tag_values(self, issue_id, tag_prefix):
-        """
-        Получает список уникальных значений тегов с указанным префиксом
-        из алертов, связанных с issue_id.
-        
-        :param issue_id: ID проблемы
-        :param tag_prefix: Префикс тегов для поиска (например, 'project_group.' или 'info_system.')
-        :return: Список уникальных значений тегов
-        """
-        # Ищем все теги, которые начинаются с указанного префикса
-        select = """
-            SELECT DISTINCT t.tag_value
-            FROM alerts a, 
-                LATERAL unnest(a.tags) t(tag_value)
-            WHERE a.issue_id = %s 
-              AND a.status != 'expired'
-              AND t.tag_value LIKE %s
-            ORDER BY t.tag_value
-        """
-        cursor = self.get_db().cursor()
-        cursor.execute(select, (issue_id, f"{tag_prefix}%"))
-        result = cursor.fetchall()
-        cursor.close()
-        
-        # Удаляем префикс из значений тегов
-        prefix_len = len(tag_prefix)
-        return [r[0][prefix_len:] for r in result if len(r[0]) > prefix_len] if result else []
-    
-    def get_issue_last_alert_time(self, issue_id):
-        """
-        Получает время создания самого последнего алерта для issue_id.
-        
-        :param issue_id: ID проблемы
-        :return: Время создания последнего алерта или None
-        """
-        select = """
-            SELECT MAX(create_time)
-            FROM alerts
-            WHERE issue_id = %s AND status != 'expired'
-        """
-        cursor = self.get_db().cursor()
-        cursor.execute(select, (issue_id,))
-        result = cursor.fetchone()
-        cursor.close()
-        
-        return result[0] if result and result[0] else None
-    
     def get_issue_aggregated_attributes(self, issue_id):
         """
         Получает все агрегированные атрибуты для issue_id за один запрос.
@@ -2766,8 +2639,6 @@ class Backend(Database):
             
             return result_dict
         except Exception as e:
-            import logging
-            import traceback
             logging.error(f"Ошибка при получении агрегированных атрибутов для issue {issue_id}: {str(e)}")
             logging.error(traceback.format_exc())
             # Возвращаем значения по умолчанию
