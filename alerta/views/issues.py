@@ -1,3 +1,4 @@
+import logging
 from flask import current_app, g, jsonify, request, url_for
 from flask_cors import cross_origin
 
@@ -232,3 +233,154 @@ def delete_issue(issue_id):
         return jsonify(status='ok')
     else:
         raise ApiError('Issue not deleted', 500)
+
+
+@api.route('/issues/merge', methods=['OPTIONS', 'POST'])
+@cross_origin()
+@permission('write:issues')
+@jsonp
+def merge_issues():
+    """
+    Слияние алертов между проблемами.
+    
+    Принимает массив объектов в формате:
+    [
+      {
+        issue_id: string,     // ID проблемы
+        all?: boolean,        // Флаг перемещения всех алертов (опционально)
+        alert_ids: string[]   // Список ID алертов для перемещения
+      }
+    ]
+    """
+    if not request.json:
+        raise ApiError('No data provided', 400)
+    
+    try:
+        merge_data = request.json
+        
+        # Проверка входных данных
+        if not isinstance(merge_data, list) or len(merge_data) < 2:
+            raise ApiError('Invalid input: need at least 2 issues to merge', 400)
+        
+        # Собираем информацию об issues
+        issue_data = []
+        incident_count = 0
+        
+        for item in merge_data:
+            issue_id = item['issue_id']
+            issue = Issue.find_by_id(issue_id)
+            
+            if not issue:
+                logging.error(f'Issue {issue_id} not found')
+                continue
+                
+            # Проверяем, является ли issue инцидентом
+            is_incident = bool(issue.inc_key)
+            if is_incident:
+                incident_count += 1
+                
+            issue_info = {
+                'issue': issue,
+                'all': item.get('all', False),
+                'alert_ids': item.get('alert_ids', []),
+                'is_incident': is_incident,
+                'create_time': issue.create_time
+            }
+            
+            issue_data.append(issue_info)
+        
+        if len(issue_data) < 2:
+            raise ApiError('Need at least 2 valid issues to merge', 400)
+            
+        # Если больше одного инцидента - ошибка
+        if incident_count > 1:
+            raise ApiError('Cannot merge multiple incidents', 400)
+        
+        # Определяем целевой issue TODO дорогая операция?
+        target_issue = None
+        incident_target = None # Проверяем наличие инцидента с all=True
+        for item in issue_data:
+            if item['is_incident'] and item['all']:
+                incident_target = item
+                break
+        
+        if incident_target:
+            target_issue = incident_target['issue']
+        else:
+            target_issue = sorted(issue_data, key=lambda x: x['create_time'])[0]['issue']
+        
+        # Получаем список исходных issues, исключая целевой
+        source_issues = [item for item in issue_data if item['issue'].id != target_issue.id]
+        
+        # Подготавливаем все ID алертов для массового перемещения
+        all_alert_ids_to_move = []
+        alerts_by_source = {}
+        
+        for source in source_issues:
+            issue = source['issue']
+            is_all = source['all']
+            alert_ids = source['alert_ids']
+            
+            # Определяем список алертов для переноса
+            alerts_to_move = []
+            if is_all:
+                alerts_to_move = issue.alerts
+            else:
+                alerts_to_move = alert_ids
+                
+            # Сохраняем алерты для каждого источника
+            alerts_by_source[issue.id] = {
+                'issue': issue,
+                'alerts_to_move': alerts_to_move,
+                'is_all': is_all
+            }
+            
+            # Добавляем ID в общий список для массового поиска
+            all_alert_ids_to_move.extend(alerts_to_move)
+        
+        # Если нет алертов для перемещения, возвращаем исходный target_issue
+        if not all_alert_ids_to_move:
+            return jsonify(status='ok', issue=target_issue.serialize)
+        
+        # Получаем все объекты Alert одним запросом
+        all_alerts = Alert.find_by_ids(all_alert_ids_to_move) if all_alert_ids_to_move else []
+        alert_map = {alert.id: alert for alert in all_alerts}
+        
+        # Перемещаем алерты из исходных issues в целевой
+        for source_id, source_data in alerts_by_source.items():
+            issue = source_data['issue']
+            alerts_to_move = source_data['alerts_to_move']
+            is_all = source_data['is_all']
+            
+            # Удаляем алерты из исходного issue
+            if alerts_to_move:
+                issue.mass_remove_alerts(alerts_to_move)
+            
+            # Находим объекты Alert для перемещения из нашего словаря
+            alert_objs = [alert_map[alert_id] for alert_id in alerts_to_move if alert_id in alert_map]
+            
+            # Добавляем алерты в целевой issue
+            if alert_objs:
+                target_issue.mass_add_alerts(alert_objs)
+            
+            # Если все алерты удалены, удаляем исходный issue
+            if is_all or len(issue.alerts) == 0:
+                Issue.delete_by_id(issue.id)
+        
+        # Обновляем атрибуты целевого issue
+        target_issue = target_issue.recalculate_and_update_issue()
+        
+        write_audit_trail.send(current_app._get_current_object(), event='issues-merged', 
+                             message='Issues merged',
+                             user=g.login, customers=g.customers, scopes=g.scopes, 
+                             resource_id=target_issue.id, type='issue', request=request)
+        
+        return jsonify(status='ok', issue=target_issue.serialize)
+        
+    except ApiError:
+        # Пробрасываем ошибки API дальше
+        raise
+    except Exception as e:
+        # Логируем и возвращаем другие ошибки
+        current_app.logger.exception(f'Error merging issues: {str(e)}')
+        raise ApiError(f'Error merging issues: {str(e)}', 500)
