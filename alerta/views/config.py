@@ -72,3 +72,13 @@ def config():
         'environments': current_app.config['ALLOWED_ENVIRONMENTS'],
         'clipboard_template': current_app.config['CLIPBOARD_TEMPLATE'],
     })
+
+
+@api.route('/config/jira-owners', methods=['GET'])
+def jira_config():
+    return jsonify({
+        'owners': {
+            'internal_owners': current_app.config.get('JIRA_OWNERS_GROUPS', {}),
+            'external_owners': current_app.config.get('JIRA_EXT_OWNERS_GROUPS', [])
+        }
+    })
