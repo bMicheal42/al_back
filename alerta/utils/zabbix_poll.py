@@ -184,7 +184,7 @@ def get_error_alerts_older_than(minutes=5):
         cutoff = datetime.utcnow() - timedelta(minutes=minutes)
         Query = namedtuple("Query", ["where", "vars", "sort", "group"])
         query = Query(
-            where="1=1\nAND DATE(create_time) <= %(to_date)s\nAND \"status\" <> %(status)s",
+            where="1=1\nAND create_time <= %(to_date)s\nAND \"status\" <> %(status)s",
             vars={'to_date': cutoff, 'status': 'closed'},
             sort="create_time DESC",
             group=[]

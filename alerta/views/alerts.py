@@ -102,6 +102,7 @@ def receive():
     finally:
         receive_lock.release()
 
+
 @api.route('/alert/<alert_id>', methods=['OPTIONS', 'GET'])
 @cross_origin()
 @permission(Scope.read_alerts)
@@ -180,13 +181,18 @@ def action_alert(alert_id):
     action = request.json.get('action', None)
     text = request.json.get('text', f'{action} operator action')
     timeout = request.json.get('timeout', None)
+    esc_group = request.json.get('escalation_group', None)
     user_req_date = request.headers.get('X-TimeStamp')
     got_date = datetime.utcnow().replace(tzinfo=timezone.utc)
+
     if user_req_date:
         user_req_date = datetime.fromtimestamp(int(user_req_date) / 1000, tz=timezone.utc)
     logging.debug(f'action: {action}, text: {text}, timeout: {timeout}')
+
     if not action:
         raise ApiError("must supply 'action' as json data", 400)
+    if action == 'esc' and not esc_group:
+        raise ApiError("No escalation group chosen", 400)
 
     customers = g.get('customers', None)
     alert = Alert.find_by_id(alert_id, customers)
@@ -198,7 +204,10 @@ def action_alert(alert_id):
         # pre action
         alert, action, text, timeout, was_updated = process_action(alert, action, text, timeout)
         # update status
-        alert = alert.from_action(action, text, timeout)
+        if action == 'esc':
+            alert = alert.from_action(action, text, timeout, esc_group)
+        else:
+            alert = alert.from_action(action, text, timeout)
         if was_updated:
             alert = alert.recalculate_incident_close()
             alert.recalculate_status_durations()

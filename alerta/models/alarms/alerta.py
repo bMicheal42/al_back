@@ -1,5 +1,8 @@
 import logging
 from flask import current_app
+from datetime import datetime, timedelta
+from importlib import import_module
+from collections import namedtuple
 
 from alerta.exceptions import ApiError, InvalidAction
 from alerta.models.alarms import AlarmModel
@@ -125,14 +128,25 @@ class StateMachine(AlarmModel):
         else:
             return TrendIndication.No_Change
 
-    def jira_transition(self, alert, transition_id: str):
+    def jira_transition(self, alert, transition_id: str, esc_group: str = None):
         jira_key = alert.attributes.get('jira_key')
         if not jira_key:
             logging.warning(f"[JIRA] У алерта нет jira_key, переход '{transition_id}' не выполнен.")
             return False
-
+        
         jira_client = JiraClient()
-        success, new_status = jira_client.transition_ticket(jira_key, transition_id)
+        
+        if esc_group:
+            JIRA_OWNERS_GROUPS = current_app.config.get('JIRA_OWNERS_GROUPS', {})
+            escalation_group = JIRA_OWNERS_GROUPS.get(esc_group, '')
+        
+            jira_client.update_issue_fields(jira_key, {
+                'customfield_19920': esc_group,  # Slack group
+                'customfield_19918': escalation_group  # Main esc group
+            })
+            logging.info(f"[JIRA] Updated fields for ticket {jira_key} with escalation group {escalation_group} (from {esc_group})")
+                
+        success, new_status = jira_client.transition_ticket(jira_key, transition_id, esc_group)
 
         if success:
             logging.info(f"[JIRA] Успешный переход алерта '{alert.id}' (JIRA: {jira_key}) в статус '{new_status}'.")
@@ -143,7 +157,7 @@ class StateMachine(AlarmModel):
             return False
 
 
-    def transition(self, alert, current_status=None, previous_status=None, action=None, **kwargs):
+    def transition(self, alert, current_status=None, previous_status=None, action=None, esc_group=None, **kwargs):
         current_status = current_status or StateMachine.DEFAULT_STATUS
         previous_status = previous_status or StateMachine.DEFAULT_STATUS
         current_severity = alert.severity
@@ -260,12 +274,12 @@ class StateMachine(AlarmModel):
                 self.jira_transition(alert, '81')
                 return next_state('OBS-0', current_severity, Status.Obs)
             elif action == Action.ESC:
-                self.jira_transition(alert, '161')
+                self.jira_transition(alert, '161', esc_group)
                 return next_state('PEN-0', current_severity, Status.Pending)
 
         if state == Status.Obs:
             if action == Action.ESC:
-                self.jira_transition(alert, '161')
+                self.jira_transition(alert, '161', esc_group)
                 return next_state('PEN-1', current_severity, Status.Pending)
             elif action == Action.AIDONE: # TODO for several AI done during observation
                 return next_state('OBS-2', current_severity, current_status)

@@ -4,7 +4,7 @@ import json
 from jira import JIRA
 from jira.exceptions import JIRAError
 from alerta.plugins import app
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
 
 LOG = logging.getLogger('alerta.jira')
 
@@ -115,7 +115,7 @@ class JiraClient:
         return None
 
 
-    def transition_ticket(self, jira_key: str, transition_id: str):
+    def transition_ticket(self, jira_key: str, transition_id: str, esc_group: str = None):
         LOG.info(f"[JIRA] Attempting to transition JIRA ticket '{jira_key}' with transition ID '{transition_id}'")
 
         if not self.jira:
@@ -132,3 +132,27 @@ class JiraClient:
         except JIRAError as e:
             LOG.error(f"[JIRA] Failed to transition JIRA ticket '{jira_key}' to transition_id '{transition_id}': {e}")
             return False, None
+            
+    def update_issue_fields(self, jira_key: str, fields: Dict[str, Any]):
+        """
+        Обновляет указанные поля в JIRA-тикете.
+        
+        :param jira_key: Ключ JIRA-тикета
+        :param fields: Словарь с полями для обновления, например {'customfield_19920': {'value': 'Level 1'}}
+        :return: True в случае успеха, False в случае ошибки
+        """
+        LOG.info(f"[JIRA] Attempting to update fields for JIRA ticket '{jira_key}'")
+
+        if not self.jira:
+            LOG.error("[JIRA] client not initialized, aborting field update.")
+            return False
+        
+        try:
+            issue = self.jira.issue(jira_key)
+            issue.update(fields=fields)
+            LOG.info(f"[JIRA] Successfully updated fields for JIRA ticket '{jira_key}'")
+            return True
+            
+        except JIRAError as e:
+            LOG.error(f"[JIRA] Failed to update fields for JIRA ticket '{jira_key}': {e}")
+            return False

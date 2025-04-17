@@ -940,7 +940,7 @@ class Alert:
             history=history)
         )
 
-    def from_action(self, action: str, text: str = '', timeout: int = None) -> 'Alert':
+    def from_action(self, action: str, text: str = '', timeout: int = None, esc_group: str = None) -> 'Alert':
         now = datetime.utcnow()
 
         status, _, previous_status, previous_timeout = self._get_hist_info(action)
@@ -958,7 +958,8 @@ class Alert:
             alert=self,
             current_status=status,
             previous_status=previous_status,
-            action=action
+            action=action,
+            esc_group=esc_group
         )
         logging.warning(f"Action [{action}] transition for '{self.id}', prev_status: {previous_status}, status: {status}, new_status: {new_status}, new_severity: {new_severity}")
         r = status_change_hook.send(self, status=new_status, text=text)
