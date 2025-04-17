@@ -72,7 +72,8 @@ class AckedBy(PluginBase):
                     alert.attributes['jira_url'] = ticket['url']
                     alert.attributes['jira_key'] = ticket['key']
                     alert.attributes['jira_status'] = ticket['status']
-
+                else:
+                    logging.error(f"Jira ticket from alert_id: {alert.id} was not created")
             return alert
 
     def delete(self, alert, **kwargs) -> bool:

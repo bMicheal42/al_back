@@ -233,7 +233,7 @@ class StateMachine(AlarmModel):
         if action == Action.FLAP and not state == Status.Flap:
             return next_state('FLAP-0', current_severity, Status.Flap)
 
-        if action == Action.ESCALATED and not state == Status.Escalated:
+        if action == Action.ESCALATED and state != Status.Escalated and state != Status.Closed:
             return next_state('ESCALATED-0', current_severity, Status.Escalated)
 
         if action == Action.CLOSE and not state == Status.Closed:
@@ -262,6 +262,7 @@ class StateMachine(AlarmModel):
             if action == Action.SHELVE:
                 return next_state('ACK-2', current_severity, Status.Shelved)
             if action == Action.INC:
+                # jira create issue
                 return next_state('ACK-4', current_severity, Status.Inc)
             # re-open ack'ed alerts if the severity actually increases
             # not just because the previous severity is the default
@@ -269,15 +270,21 @@ class StateMachine(AlarmModel):
                 if self.trend(previous_severity, current_severity) == TrendIndication.More_Severe:
                     return next_state('ACK-3', current_severity, Status.Open)
 
-        if state == Status.Inc:
+
+        if state == Status.Inc and is_incident:
             if action == Action.AIDONE:
                 self.jira_transition(alert, '81')
                 return next_state('OBS-0', current_severity, Status.Obs)
             elif action == Action.ESC:
                 self.jira_transition(alert, '161', esc_group)
                 return next_state('PEN-0', current_severity, Status.Pending)
+        elif state == Status.Inc:
+            if action == Action.AIDONE:
+                raise InvalidAction(f'Jira issue is not created yet. Please try again few seconds later. 🙃')
+            elif action == Action.ESC:
+                raise InvalidAction(f'Jira issue is not created yet. Please try again few seconds later. 🙃')
 
-        if state == Status.Obs:
+        if state == Status.Obs and is_incident:
             if action == Action.ESC:
                 self.jira_transition(alert, '161', esc_group)
                 return next_state('PEN-1', current_severity, Status.Pending)

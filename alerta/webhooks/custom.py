@@ -1,3 +1,5 @@
+import logging
+
 from flask import current_app, g, jsonify, request
 from flask_cors import cross_origin
 
@@ -19,6 +21,7 @@ from . import webhooks
 @cross_origin()
 @permission(Scope.write_webhooks)
 def custom(webhook, path):
+    logging.debug(f"webhook: |{webhook}| path: |{path}| custom_webhooks: {custom_webhooks.webhooks}")
     if webhook not in custom_webhooks.webhooks:
         raise ApiError(f"Custom webhook '{webhook}' not found.", 404)
 

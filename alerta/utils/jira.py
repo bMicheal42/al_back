@@ -112,7 +112,7 @@ class JiraClient:
 
             LOG.error(f"Error creating JIRA ticket: {e.status_code} - {e.text if hasattr(e, 'text') else ''}")
             LOG.error(f"Response content: {error_text}")
-        return None
+            return None
 
 
     def transition_ticket(self, jira_key: str, transition_id: str, esc_group: str = None):
@@ -156,3 +156,4 @@ class JiraClient:
         except JIRAError as e:
             LOG.error(f"[JIRA] Failed to update fields for JIRA ticket '{jira_key}': {e}")
             return False
+

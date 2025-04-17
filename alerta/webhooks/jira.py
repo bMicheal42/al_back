@@ -13,6 +13,7 @@ JSON = Dict[str, Any]
 
 class JiraWebhook(WebhookBase):
     def _parse_jira_payload(self, payload):
+        logging.warning(f"Jira webhook with payload {payload}")
         issue_key = payload.get("key", "")
         fields = payload.get("fields", {})
 

@@ -731,7 +731,7 @@ class Alert:
                 if all_childs_resolved or not children:
                     return self.from_action('close', 'Auto ', timeout=None)
                 else:
-                    self.set_status(self.status, text='Resolved inc alert from zabbix')
+                    self.set_status(self.status, text='alert was')
                     return self
 
         return self
