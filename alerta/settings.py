@@ -94,8 +94,8 @@ JIRA_EXT_OWNERS_GROUPS = [
     "videoservices_devops"
 ]
 
-JIRA_USER = ''
-JIRA_PWD = ''
+JIRA_USER = 'jira.autoticket'
+JIRA_PWD = 'MubrOFVkM1jQ5WA5hiQtcNM3Ggfw6b2bFInjGN'
 
 ZABBIX_SEVERITY_MAPPING = {
     'Средняя':            'medium',
@@ -162,7 +162,7 @@ ALLOW_READONLY = False
 READONLY_SCOPES = ['read']
 
 BASIC_AUTH_REALM = 'Alerta'
-SIGNUP_ENABLED = False
+SIGNUP_ENABLED = True
 
 HMAC_AUTH_CREDENTIALS = [
     # {
