@@ -554,6 +554,9 @@ class Alert:
                         alert.update_attributes(alert.attributes)
                     returning = alert
                 return returning, False
+            elif not found and resolved_in_zabbix:
+                logging.error(f"Not existing alert with OK state came from Zabbix event_id: {zabbix_id}")
+                return self, False
             else:
                 ZABBIX_SEVERITY_MAPPING = current_app.config.get('ZABBIX_SEVERITY_MAPPING', {})
                 zabbix_severity = self.attributes.get('zabbix_severity', None)
