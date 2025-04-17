@@ -6,7 +6,7 @@ from collections import namedtuple
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Union, Tuple, TYPE_CHECKING
 from uuid import uuid4
-
+from alerta.models.history import History
 from flask import current_app, g
 from flask import jsonify
 from alerta.exceptions import ApiError
@@ -110,7 +110,7 @@ class Issue:
             'info_systems': self.info_systems,
             'attributes': self.attributes,
             'master_incident': self.master_incident,
-            'issue_history': self.issue_history
+            'issue_history': [h.serialize for h in self.issue_history] if self.issue_history else []
         }
 
     def get_id(self, short: bool = False) -> str:
@@ -135,6 +135,8 @@ class Issue:
         if alerts:
             alerts = list(set(alerts))
             
+        
+        
         return Issue(
             id=doc.get('id', None) or doc.get('_id'),
             summary=doc.get('summary', None),
@@ -158,7 +160,7 @@ class Issue:
             info_systems=doc.get('info_systems', list()),
             attributes=doc.get('attributes', dict()),
             master_incident=doc.get('master_incident', None),
-            issue_history=doc.get('issue_history', list())
+            issue_history=[History.from_db(h) for h in doc.get('issue_history', list())]
         )
         
     @classmethod
