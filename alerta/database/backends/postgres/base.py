@@ -2570,7 +2570,7 @@ class Backend(Database):
                 SELECT 
                     CASE 
                         WHEN COUNT(*) > 0 THEN TRUE 
-                        ELSE FALSE 
+                        ELSE TRUE -- Меняем на TRUE по умолчанию
                     END AS is_critical
                 FROM issue_alerts
                 WHERE attributes->>'host_critical' = '1'
@@ -2594,7 +2594,7 @@ class Backend(Database):
                     LATERAL unnest(a.tags) t(tag_value)
                 WHERE t.tag_value LIKE 'InfoSystem:%%'
             ),
-            -- Получаем last_alert_time
+            -- Получаем last_alert_time (используем MAX - самое позднее)
             last_alert_time AS (
                 SELECT MAX(create_time) AS last_time
                 FROM issue_alerts
@@ -2627,7 +2627,7 @@ class Backend(Database):
             if not result:
                 return {
                     'severity': 'normal',
-                    'host_critical': False,
+                    'host_critical': True,  # Меняем на True по умолчанию
                     'hosts': [],
                     'project_groups': [],
                     'info_systems': [],
@@ -2651,7 +2651,7 @@ class Backend(Database):
             # Возвращаем значения по умолчанию
             return {
                 'severity': 'normal',
-                'host_critical': False,
+                'host_critical': True,  # Меняем на True по умолчанию
                 'hosts': [],
                 'project_groups': [],
                 'info_systems': [],

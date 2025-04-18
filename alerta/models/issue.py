@@ -352,7 +352,7 @@ class Issue:
                 from alerta.models.alert import Alert
                 Alert.unlink_alerts(alert_ids)
                 # Если это не инцидент с inc_key, удаляем Issue
-                # Issue.delete_by_id(self.id)
+                Issue.delete_by_id(self.id)
                 # добавить атрибут is_deleted со значением - id таргетного self.id
                 return
         else:
@@ -385,7 +385,7 @@ class Issue:
         # Получаем обновленные атрибуты с помощью SQL
         try:
             updated_attrs = Issue.recalculate_issue_attributes(self.id)
-
+            logging.warning(f"updated_attrs: {updated_attrs}")
             # Если обновления отсутствуют, возвращаем текущий Issue
             if not updated_attrs:
                 logging.debug(f"Нет обновлений для Issue {self.id}")
@@ -666,7 +666,7 @@ class Issue:
             # Возвращаем значения по умолчанию
             default_attrs = {
                 'severity': 'medium',
-                'host_critical': '1',
+                'host_critical': '1',  # Устанавливаем по умолчанию в 1
                 'hosts': [],
                 'project_groups': [],
                 'info_systems': []

@@ -316,7 +316,7 @@ def merge_issues():
         # Подготавливаем все ID алертов для массового перемещения
         all_alert_ids_to_move = []
         # alerts_by_source = {}
-        
+
         for source in source_issues:
             issue = source['issue']
             alert_ids = source['alert_ids']
@@ -324,16 +324,16 @@ def merge_issues():
             all_alert_ids_to_move.extend(alert_ids)
 
         logging.warning(f'all_alert_ids_to_move: {all_alert_ids_to_move}')
-        target_issue['issue'].link_alerts_to_issue(all_alert_ids_to_move)
+        updated_target = target_issue['issue'].link_alerts_to_issue(all_alert_ids_to_move)
 
-        logging.warning(f'ISSUE MERGE DONE in issue: {target_issue}')
+        logging.warning(f'Merge SOURCE:{source_issues} DONE in TARGET: {updated_target}')
         
         write_audit_trail.send(current_app._get_current_object(), event='issues-merged', 
                              message='Issues merged',
                              user=g.login, customers=g.customers, scopes=g.scopes, 
-                             resource_id=target_issue['issue'].id, type='issue', request=request)
+                             resource_id=updated_target.id, type='issue', request=request)
         
-        return jsonify(status='ok', issue=target_issue['issue'].serialize)
+        return jsonify(status='ok', issue=updated_target.serialize)
         
     except ApiError:
         # Пробрасываем ошибки API дальше
