@@ -2473,20 +2473,20 @@ class Backend(Database):
         logging.info(f"Обновление issue_id алерта {alert_id} на {issue_id}")
         return self._updateone(update, (issue_id, alert_id), returning=True)
 
-    def update_issueid_for_alerts(self, alerts: List, new_issue_id: str = None) -> List[dict]:
+    def update_issueid_for_alerts(self, alert_ids: List[str], new_issue_id: str = None) -> List[dict]:
         """
         Массовое обновление issue_id для списка алертов.
         
-        :param alerts: Список объектов Alert, которые нужно обновить
+        :param alert_ids: Список ID алертов, которые нужно обновить
         :param new_issue_id: Новый ID задачи (None для отлинковки)
         :return: Список обновленных алертов
         """
-        if not alerts:
+        if not alert_ids:
             logging.warn('No alerts to update with new issue_id')
             return []
             
-        # Получаем список ID алертов из объектов Alert
-        alert_ids = [alert.id for alert in alerts]
+        # Используем list(set()) для обеспечения уникальности ID алертов
+        alert_ids = list(set(alert_ids))
             
         # Преобразуем None в NULL для SQL запроса
         if new_issue_id:
@@ -2598,6 +2598,11 @@ class Backend(Database):
             last_alert_time AS (
                 SELECT MAX(create_time) AS last_time
                 FROM issue_alerts
+            ),
+            -- Получаем минимальное значение create_time (самое раннее)
+            min_create_time AS (
+                SELECT MIN(create_time) AS earliest_time
+                FROM issue_alerts
             )
             
             -- Собираем все вычисленные данные
@@ -2607,7 +2612,8 @@ class Backend(Database):
                 (SELECT hosts FROM unique_hosts) AS hosts,
                 (SELECT project_groups FROM project_groups) AS project_groups,
                 (SELECT info_systems FROM info_systems) AS info_systems,
-                (SELECT last_time FROM last_alert_time) AS last_alert_time
+                (SELECT last_time FROM last_alert_time) AS last_alert_time,
+                (SELECT earliest_time FROM min_create_time) AS earliest_create_time
             """
             cursor = self.get_db().cursor()
             
@@ -2625,11 +2631,12 @@ class Backend(Database):
                     'hosts': [],
                     'project_groups': [],
                     'info_systems': [],
-                    'last_alert_time': None
+                    'last_alert_time': None,
+                    'earliest_create_time': None
                 }
             
             # Сформируем словарь с результатами
-            keys = ['severity', 'host_critical', 'hosts', 'project_groups', 'info_systems', 'last_alert_time']
+            keys = ['severity', 'host_critical', 'hosts', 'project_groups', 'info_systems', 'last_alert_time', 'earliest_create_time']
             result_dict = {k: v for k, v in zip(keys, result)}
             
             # Преобразуем пустые массивы из None в пустой список
@@ -2648,5 +2655,6 @@ class Backend(Database):
                 'hosts': [],
                 'project_groups': [],
                 'info_systems': [],
-                'last_alert_time': None
+                'last_alert_time': None,
+                'earliest_create_time': None
             }

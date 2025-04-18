@@ -4,19 +4,22 @@ import platform
 import sys
 from collections import namedtuple
 from datetime import datetime
-from typing import Optional, List, Dict, Any, Union, Tuple
+from typing import Optional, List, Dict, Any, Union, Tuple, TYPE_CHECKING
 from uuid import uuid4
 
 from flask import current_app, g
+from flask import jsonify
+from alerta.exceptions import ApiError
 
 from alerta.app import db
 from alerta.database.base import Query
 from alerta.models.history import History
 from alerta.utils.format import DateTime
 from alerta.utils.response import absolute_url
-from alerta.models.alert import Alert
-# Импортируем Alert для функций, которые его используют
-from alerta.models.alert import Alert
+
+# Избегаем циклического импорта с использованием TYPE_CHECKING
+if TYPE_CHECKING:
+    from alerta.models.alert import Alert
 
 JSON = Dict[str, Any]
 NoneType = type(None)
@@ -43,7 +46,9 @@ class Issue:
         self.slack_link = kwargs.get('slack_link', None) or ''
         self.disaster_link = kwargs.get('disaster_link', None) or ''
         self.escalation_group = kwargs.get('escalation_group', None) or ''
-        self.alerts = kwargs.get('alerts', None) or list()
+        # Обеспечиваем уникальность алертов при инициализации
+        alerts = kwargs.get('alerts', None) or list()
+        self.alerts = list(set(alerts))
         self.hosts = kwargs.get('hosts', None) or list()
         self.project_groups = kwargs.get('project_groups', None) or list()
         self.info_systems = kwargs.get('info_systems', None) or list()
@@ -125,6 +130,11 @@ class Issue:
 
     @classmethod
     def from_document(cls, doc: Dict[str, Any]) -> 'Issue':
+        # Обеспечиваем уникальность алертов при создании из документа
+        alerts = doc.get('alerts', list())
+        if alerts:
+            alerts = list(set(alerts))
+            
         return Issue(
             id=doc.get('id', None) or doc.get('_id'),
             summary=doc.get('summary', None),
@@ -142,7 +152,7 @@ class Issue:
             slack_link=doc.get('slack_link', None),
             disaster_link=doc.get('disaster_link', None),
             escalation_group=doc.get('escalation_group', None),
-            alerts=doc.get('alerts', list()),
+            alerts=alerts,
             hosts=doc.get('hosts', list()),
             project_groups=doc.get('project_groups', list()),
             info_systems=doc.get('info_systems', list()),
@@ -197,6 +207,26 @@ class Issue:
     def find_all(cls, query=None, page=1, page_size=100) -> List['Issue']:
         return [Issue.from_db(issue) for issue in db.get_issues(query, page, page_size)]
         
+    # find issues by list of ids
+    @classmethod
+    def find_by_ids(cls, ids: List[str]) -> List['Issue']:
+        """
+        Находит множество инцидентов по списку их ID.
+        Намного эффективнее, чем вызывать find_by_id для каждого ID отдельно.
+        
+        :param ids: Список ID инцидентов
+        :return: Список объектов Issue
+        """
+        if not ids:
+            return []
+        
+        # Поскольку в DB API нет специального метода для поиска множества инцидентов по ID,
+        # создаем запрос с условием WHERE id IN (...)
+        where = 'id = ANY(%(ids)s)'
+        query = Query(where=where, sort='create_time DESC', group='', vars={'ids': ids})
+        
+        return [Issue.from_db(issue) for issue in db.get_issues(query)]
+        
     # update an issue
     def update(self, **kwargs) -> 'Issue':
         now = datetime.utcnow()
@@ -204,6 +234,10 @@ class Issue:
         
         change_type = kwargs.pop('change_type', 'update')
         text = kwargs.pop('text', '')
+        
+        # Если обновляется поле alerts, обеспечиваем уникальность
+        if 'alerts' in kwargs:
+            kwargs['alerts'] = list(set(kwargs['alerts']))
         
         for attr, value in kwargs.items():
             if hasattr(self, attr):
@@ -244,69 +278,97 @@ class Issue:
     def delete_by_id(cls, issue_id: str) -> bool:
         return db.delete_issue(issue_id)
 
+
+    def link_alerts_to_issue(self, new_alert_ids: List[str]) -> 'Issue':
+        """
+        Оптимизированное массовое добавление алертов к Issue 
+        с использованием SQL для проверки уникальности.
+        
+        :param alert_ids: Список ID алертов, которые нужно добавить
+        :return: Обновленный Issue
+        """
+        # Проверяем, что список ID не пустой
+        if not new_alert_ids:
+            logging.debug(f"Список alert_ids для добавления пуст")
+            return self
+        
+        logging.debug(f"Добавление {len(new_alert_ids)} новых алертов к Issue {self.id}")
+        
+        current_alerts_ids = self.alerts if hasattr(self, 'alerts') else []
+        all_alerts_ids = current_alerts_ids + new_alert_ids
+        new_alerts_count = len(all_alerts_ids) - len(current_alerts_ids)
+        
+        if new_alerts_count == 0:
+            logging.debug(f"Все алерты уже привязаны к Issue {self.id}")
+            return self
+        
+        # Обновляем алерты новым issue_id
+        from alerta.models.alert import Alert
+        Alert.link_alerts(new_alert_ids, self.id)
+        
+        # Обновляем Issue добавляя новые alert_ids
+        updated_issue = self.update(
+            alerts=all_alerts_ids,
+            change_type='alerts-added',
+            text=f'Added {new_alerts_count} alerts to issue'
+        )
+        updated_issue = updated_issue.recalculate_and_update_issue()
+        logging.info(f"Successfully added {new_alerts_count} alerts to issue {self.id}")
+        return updated_issue
+    
+
     # массовое удаление алертов из issue с использованием SQL-агрегации
-    def mass_remove_alerts(self, alert_ids: List[str]) -> 'Issue':
+    def unlink_alerts_from_issue(self, alert_ids: List[str], target_issue_id = None) -> 'Issue':
         """
         Массовое удаление алертов из Issue с использованием SQL-агрегации
         для обновления атрибутов.
         
         :param alert_ids: Список ID алертов, которые нужно удалить
-        :return: Обновленный Issue
+        :return: Обновленный Issue или ApiError если инцидент остается без алертов
         """
         if not alert_ids:
             logging.debug(f"Список алертов для удаления пуст")
             return self
         
-        # TODO оптимизировать
-        alert_ids_to_remove = [a_id for a_id in alert_ids if a_id in self.alerts]
-        
-        if not alert_ids_to_remove:
-            logging.debug(f"Нет алертов для удаления из Issue {self.id}")
-            return self
-        
-        logging.debug(f"Удаление {len(alert_ids_to_remove)} алертов из Issue {self.id}")
+        logging.debug(f"Удаление {len(alert_ids)} алертов из Issue {self.id}")
         
         # Определяем оставшиеся алерты
-        remaining_alert_ids = [a_id for a_id in self.alerts if a_id not in alert_ids_to_remove]
+        remaining_alert_ids = [a_id for a_id in self.alerts if a_id not in alert_ids]
         update_data = {'alerts': remaining_alert_ids}
-        change_text = f'Removed {len(alert_ids_to_remove)} alerts from issue'
+        change_text = f'Removed {len(alert_ids)} alerts from issue'
         
-        # Если это были последние алерты в Issue, Issue будет закрыт
+        # Проверяем, остались ли алерты в Issue
         if not remaining_alert_ids:
-            logging.debug(f"Last alerts removed from issue {self.id}, issue will be closed")
-            # update_data['status'] = 'closed'
-            # update_data['resolve_time'] = datetime.utcnow()
-            # update_data['hosts'] = []
-            # update_data['project_groups'] = []
-            # update_data['info_systems'] = []
-            # change_text += ' (issue closed as no alerts remain)'
-            #
-            # # Обновляем Issue в БД
-            # updated_issue = self.update(
-            #     **update_data,
-            #     change_type='alerts-removed',
-            #     text=change_text
-            # )
-            #
-            # # В случае закрытия issue, мы отвязываем все алерты
-            # from alerta.models.alert import Alert
-            # Alert.unlink_alerts_from_issue(alert_ids_to_remove, self)
-            #
-            # return updated_issue
+            logging.debug(f"Last alerts removed from issue {self.id}")
+            
+            # Проверяем, является ли Issue инцидентом (имеет inc_key)
+            if self.inc_key:
+                # Нельзя удалять инцидент с inc_key, если в нем не остается алертов
+                logging.error(f"Cannot remove all alerts from incident with inc_key={self.inc_key}")
+                raise ApiError(f"Cannot remove all alerts from incident with inc_key={self.inc_key}", 400)
+            else:
+                logging.info(f"Deleting issue {self.id} as it has no alerts and no inc_key")
+                # отлинковываем алерты от Issue
+                from alerta.models.alert import Alert
+                Alert.unlink_alerts(alert_ids)
+                # Если это не инцидент с inc_key, удаляем Issue
+                # Issue.delete_by_id(self.id)
+                # добавить атрибут is_deleted со значением - id таргетного self.id
+                return
         else:
+            # отлинковываем алерты от Issue
+            from alerta.models.alert import Alert
+            Alert.unlink_alerts(alert_ids)
+            
+            # Пересчитываем атрибуты Issue
             updated_issue = self.update(
                 alerts=remaining_alert_ids,
                 change_type='alerts-removed',
                 text=change_text
             )
-            
-            # Используем оптимизированный метод для массового отлинкования алертов от issue
-            from alerta.models.alert import Alert
-            Alert.unlink_alerts_from_issue(alert_ids_to_remove)
-
-            updated_issue = updated_issue.recalculate_and_update_issue()
-            
+            updated_issue = updated_issue.recalculate_and_update_issue()    
             return updated_issue
+        
 
     # обновление атрибутов Issue с использованием SQL-агрегации
     def recalculate_and_update_issue(self) -> 'Issue':
@@ -341,85 +403,7 @@ class Issue:
             logging.error(traceback.format_exc())
             # Возвращаем текущий объект без изменений в случае ошибки
             return self
-
-
-    def mass_add_alerts(self, alerts) -> 'Issue':
-        """
-        Оптимизированное массовое добавление алертов к Issue 
-        с использованием SQL для проверки уникальности.
-        
-        :param alerts: Список объектов Alert или один объект Alert, которые нужно добавить
-        :return: Обновленный Issue
-        """
-        # Проверяем, является ли alerts итерируемым объектом или одиночным Alert
-        if not alerts:
-            logging.debug(f"Список алертов для добавления пуст")
-            return self
-            
-        # Преобразуем одиночный алерт в список
-        if hasattr(alerts, 'id'):  # Это одиночный объект Alert
-            alerts = [alerts]
-            
-        # Собираем идентификаторы алертов для добавления
-        alert_ids_to_add = [alert.id for alert in alerts]
-        
-        # Используем SQL для фильтрации только уникальных идентификаторов,
-        # которых еще нет в текущем issue
-        from alerta.app import db
-        cursor = db.get_db().cursor()
-        
-        # SQL-запрос для получения только новых уникальных alert_ids
-        sql = """
-        WITH issue_alerts AS (
-            SELECT unnest(%s::text[]) AS alert_id
-        )
-        SELECT DISTINCT ia.alert_id 
-        FROM issue_alerts ia
-        WHERE 
-            ia.alert_id NOT IN (
-                SELECT unnest(alerts) 
-                FROM issues 
-                WHERE id = %s
-            )
-            AND ia.alert_id NOT IN (
-                SELECT id FROM alerts 
-                WHERE issue_id IS NOT NULL AND issue_id != %s
-            )
-        """
-        
-        # Выполняем запрос
-        cursor.execute(sql, (alert_ids_to_add, self.id, self.id))
-        new_alert_ids = [row[0] for row in cursor.fetchall()]
-        new_alerts_count = len(new_alert_ids)
-        cursor.close()
-        
-        if not new_alert_ids:
-            logging.debug(f"Все алерты уже привязаны к Issue {self.id}")
-            return self
-        
-        logging.debug(f"Добавление {new_alerts_count} новых алертов к Issue {self.id}")
-        
-        # Обновляем текущий список алертов
-        current_alerts = self.alerts if hasattr(self, 'alerts') else []
-        
-        # Обновляем Issue добавляя новые alert_ids
-        updated_issue = self.update(
-            alerts=current_alerts + new_alert_ids,
-            change_type='alerts-added',
-            text=f'Added {new_alerts_count} alerts to issue'
-        )
-        
-        # Получаем список объектов Alert для передачи в метод mass_link_to_issue
-        new_alerts = [alert for alert in alerts if alert.id in new_alert_ids]
-        
-        # Используем оптимизированный метод для массового линкования алертов к issue
-        Alert.link_alerts_to_issue(new_alerts, self.id)
-
-        # Обновляем атрибуты Issue с помощью SQL-агрегации
-        updated_issue = updated_issue.recalculate_and_update_issue()
-        
-        logging.info(f"Successfully added {new_alerts_count} alerts to issue {self.id}")
-        return updated_issue
+    
 
     @classmethod
     def find_matching_issue(cls, alert):
@@ -536,10 +520,12 @@ class Issue:
                 logging.warning(f"Issue for linking Found: {issue.id}")
                 
                 try:
-                    # Передаем объекты Alert в виде списка в метод mass_add_alerts
-                    issue = issue.mass_add_alerts([alert])
+                    # Передаем ID алерта в метод link_alerts_to_issue
+                    issue = issue.link_alerts_to_issue([alert.id])
                     # Связываем алерт с Issue
-                    alert = alert.link_to_issue(issue)
+                    from alerta.models.alert import Alert
+                    if isinstance(alert, Alert):
+                        alert = alert.link_alert(issue)
                     
                     logging.info(f"Added alert {alert.id} to existing issue {issue_id}")
                     return alert
@@ -628,7 +614,9 @@ class Issue:
         logging.info(f"Created new Issue {issue.id} for alert {alert.id}")
         
         # Привязываем алерт к Issue
-        alert = alert.link_to_issue(issue)
+        from alerta.models.alert import Alert
+        if isinstance(alert, Alert):
+            alert = alert.link_alert(issue)
         logging.info(f"Linked alert {alert.id} to Issue {issue.id}")
         
         return alert
@@ -662,6 +650,11 @@ class Issue:
             # Добавляем last_alert_time, если оно есть
             if agg_attrs['last_alert_time']:
                 updated_attrs['last_alert_time'] = agg_attrs['last_alert_time']
+            
+            # Добавляем earliest_create_time в качестве create_time для Issue, если оно есть
+            if agg_attrs['earliest_create_time']:
+                updated_attrs['create_time'] = agg_attrs['earliest_create_time']
+                logging.debug(f"Установлено наименьшее create_time для Issue {issue_id}: {agg_attrs['earliest_create_time']}")
             
             logging.debug(f"Результат SQL-агрегации для Issue {issue_id}: {updated_attrs}")
             return updated_attrs

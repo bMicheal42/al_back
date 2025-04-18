@@ -23,6 +23,7 @@ from alerta.utils.format import DateTime
 from alerta.utils.hooks import status_change_hook
 from alerta.utils.response import absolute_url
 
+from alerta.models.issue import Issue
 JSON = Dict[str, Any]
 NoneType = type(None)
 
@@ -379,59 +380,6 @@ class Alert:
 
 
         return current_status, current_value, h_loop[1].status, h_loop[1].timeout
-
-    # de-duplicate an alert
-    # def deduplicate(self, duplicate_of) -> 'Alert':
-    #     now = datetime.utcnow()
-
-    #     status, previous_value, previous_status, _ = self._get_hist_info()
-
-    #     _, new_status = alarm_model.transition(
-    #         alert=self,
-    #         current_status=status,
-    #         previous_status=previous_status
-    #     )
-
-    #     self.repeat = True
-    #     self.last_receive_id = self.id
-    #     self.last_receive_time = now
-
-    #     if new_status != status:
-    #         r = status_change_hook.send(duplicate_of, status=new_status, text=self.text)
-    #         _, (_, new_status, text) = r[0]
-    #         self.update_time = now
-
-    #         history = History(
-    #             id=self.id,
-    #             event=self.event,
-    #             severity=self.severity,
-    #             status=new_status,
-    #             value=self.value,
-    #             text=text,
-    #             change_type=ChangeType.status,
-    #             update_time=self.create_time,
-    #             user=g.login,
-    #             timeout=self.timeout,
-    #         )  # type: Optional[History]
-
-    #     elif current_app.config['HISTORY_ON_VALUE_CHANGE'] and self.value != previous_value:
-    #         history = History(
-    #             id=self.id,
-    #             event=self.event,
-    #             severity=self.severity,
-    #             status=status,
-    #             value=self.value,
-    #             text=self.text,
-    #             change_type=ChangeType.value,
-    #             update_time=self.create_time,
-    #             user=g.login,
-    #             timeout=self.timeout,
-    #         )
-    #     else:
-    #         history = None
-
-    #     self.status = new_status
-    #     return Alert.from_db(db.dedup_alert(self, history))
 
     def deduplicate(self, duplicate_alert) -> 'Alert':
         now = datetime.utcnow()
@@ -1026,10 +974,8 @@ class Alert:
         return db.mass_update_status(alert_ids, status, timeout, update_time)
 
     # link alert to issue
-    def link_to_issue(self, issue) -> 'Alert':
-        from alerta.models.issue import Issue
-        
-        issue_id = issue.id       
+    def link_alert(self, issue) -> 'Alert':
+        issue_id = issue.id
         logging.warning(f"Привязка алерта {self.id} к issue {issue_id}")
         
         if self.issue_id == issue_id:
@@ -1074,18 +1020,20 @@ class Alert:
 
     # массовое связывание алертов с issue
     @staticmethod
-    def link_alerts_to_issue(alerts, issue_id):
+    def link_alerts(alert_ids, issue_id):
         """
         Массовое связывание алертов с задачей
         """
-        if not alerts:
+        if not alert_ids:
             return 0
 
-        logging.info(f"Mass linking {len(alerts)} alerts to issue {issue_id}")
+        # Обеспечиваем уникальность ID алертов
+        alert_ids = list(set(alert_ids))
+        logging.info(f"Mass linking {len(alert_ids)} alerts to issue {issue_id}")
         
         try:
             return db.update_issueid_for_alerts(
-                alerts=alerts,
+                alert_ids=alert_ids,
                 new_issue_id=issue_id
             )
         except Exception as e:
@@ -1095,18 +1043,20 @@ class Alert:
 
     # массовое отвязывание алертов от issue
     @staticmethod
-    def unlink_alerts_from_issue(alerts):
+    def unlink_alerts(alert_ids):
         """
         Массовое отвязывание алертов от задачи
         """
-        if not alerts:
+        if not alert_ids:
             return 0
 
-        logging.info(f"Mass unlinking {len(alerts)} alerts from issue")
+        # Обеспечиваем уникальность ID алертов
+        alert_ids = list(set(alert_ids))
+        logging.info(f"Mass unlinking {len(alert_ids)} alerts from issue")
         
         try:
             return db.update_issueid_for_alerts(
-                alerts=alerts
+                alert_ids=alert_ids
             )
         except Exception as e:
             logging.error(f"Error mass unlinking alerts from issue: {e}")

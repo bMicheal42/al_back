@@ -264,6 +264,7 @@ def merge_issues():
         
         # Собираем информацию об issues
         issue_data = []
+        targe_issue = None
         incident_count = 0
         
         for item in merge_data:
@@ -278,7 +279,7 @@ def merge_issues():
             is_incident = bool(issue.inc_key)
             if is_incident:
                 incident_count += 1
-                
+
             issue_info = {
                 'issue': issue,
                 'all': item.get('all', False),
@@ -286,27 +287,17 @@ def merge_issues():
                 'is_incident': is_incident,
                 'create_time': issue.create_time
             }
-            
+
+            if issue_info['all'] and issue_info['is_incident']:
+                targe_issue = issue_info
             issue_data.append(issue_info)
         
         if len(issue_data) < 2:
             raise ApiError('Need at least 2 valid issues to merge', 400)
-            
-        # Если больше одного инцидента - ошибка
         if incident_count > 1:
             raise ApiError('Cannot merge multiple incidents', 400)
         
-        # Определяем целевой issue TODO дорогая операция?
-        target_issue = None
-        incident_target = None # Проверяем наличие инцидента с all=True
-        for item in issue_data:
-            if item['is_incident'] and item['all']:
-                incident_target = item
-                break
-        
-        if incident_target:
-            target_issue = incident_target['issue']
-        else:
+        if not targe_issue:
             target_issue = sorted(issue_data, key=lambda x: x['create_time'])[0]['issue']
         
         # Получаем список исходных issues, исключая целевой
@@ -354,14 +345,14 @@ def merge_issues():
             
             # Удаляем алерты из исходного issue
             if alerts_to_move:
-                issue.mass_remove_alerts(alerts_to_move)
+                issue.unlink_alerts_from_issue(alerts_to_move)
             
             # Находим объекты Alert для перемещения из нашего словаря
-            alert_objs = [alert_map[alert_id] for alert_id in alerts_to_move if alert_id in alert_map]
+            alert_ids = [alert_id for alert_id in alerts_to_move if alert_id in alert_map]
             
             # Добавляем алерты в целевой issue
-            if alert_objs:
-                target_issue.mass_add_alerts(alert_objs)
+            if alert_ids:
+                target_issue.link_alerts_to_issue(alert_ids)
             
             # Если все алерты удалены, удаляем исходный issue
             if is_all or len(issue.alerts) == 0:
