@@ -182,22 +182,43 @@ def get_issue_alerts(issue_id):
 
     if not issue:
         raise ApiError('Issue not found', 404)
-        
+    
+    # Формируем запрос для поиска алертов по issue_id    
     query = Query(where=f"issue_id='{issue_id}'", sort="create_time DESC", group="")
-    alerts = Alert.find_all_really(query)
+    
+    # Сначала получаем общее количество алертов для расчета пагинации
+    total = Alert.get_count(query)
+    
+    # Создаем параметры пагинации с информацией о количестве элементов
+    page = Page.from_params(request.args, total)
+    
+    # Теперь получаем алерты с учетом пагинации
+    alerts = Alert.find_all(query=query, page=page.page, page_size=page.page_size)
+    
+    # Расчет пагинации
+    total_pages = page.pages
+    has_more = page.has_more
     
     if alerts:
         return jsonify(
             status='ok',
             issue=issue.serialize,
             alerts=[alert.serialize for alert in alerts],
-            total=len(alerts)
+            page=page.page,
+            pageSize=page.page_size,
+            pages=total_pages,
+            more=has_more,
+            total=total
         )
     else:
         return jsonify(
             status='ok',
             issue=issue.serialize,
             alerts=[],
+            page=page.page,
+            pageSize=page.page_size,
+            pages=0,
+            more=False,
             total=0
         )
 
